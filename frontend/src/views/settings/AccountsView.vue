@@ -643,8 +643,8 @@ const webhookUrl = window.location.origin + '/api/webhook'
         </div>
 
         <DialogFooter>
-          <Button variant="outline" @click="isDialogOpen = false">Cancel</Button>
-          <Button @click="saveAccount" :disabled="isSubmitting">
+          <Button variant="outline" size="sm" @click="isDialogOpen = false">Cancel</Button>
+          <Button size="sm" @click="saveAccount" :disabled="isSubmitting">
             <Loader2 v-if="isSubmitting" class="h-4 w-4 mr-2 animate-spin" />
             {{ editingAccount ? 'Update' : 'Create' }} Account
           </Button>

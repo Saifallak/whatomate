@@ -736,10 +736,10 @@ async function addRecipientsFromCSV() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" @click="showCreateDialog = false" :disabled="isCreating">
+              <Button variant="outline" size="sm" @click="showCreateDialog = false" :disabled="isCreating">
                 Cancel
               </Button>
-              <Button @click="createCampaign" :disabled="isCreating">
+              <Button size="sm" @click="createCampaign" :disabled="isCreating">
                 <Loader2 v-if="isCreating" class="h-4 w-4 mr-2 animate-spin" />
                 Create Campaign
               </Button>
@@ -981,12 +981,13 @@ async function addRecipientsFromCSV() {
           <Button
             v-if="selectedCampaign?.status === 'draft'"
             variant="outline"
+            size="sm"
             @click="showRecipientsDialog = false; openAddRecipientsDialog(selectedCampaign as any)"
           >
             <UserPlus class="h-4 w-4 mr-2" />
             Add More
           </Button>
-          <Button variant="outline" @click="showRecipientsDialog = false">Close</Button>
+          <Button variant="outline" size="sm" @click="showRecipientsDialog = false">Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1196,7 +1197,7 @@ async function addRecipientsFromCSV() {
         </Tabs>
 
         <DialogFooter class="border-t pt-4 mt-4">
-          <Button variant="outline" @click="showAddRecipientsDialog = false" :disabled="isAddingRecipients">
+          <Button variant="outline" size="sm" @click="showAddRecipientsDialog = false" :disabled="isAddingRecipients">
             Cancel
           </Button>
         </DialogFooter>

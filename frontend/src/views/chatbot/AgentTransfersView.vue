@@ -630,8 +630,8 @@ function getSourceBadge(source: string) {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" @click="assignDialogOpen = false">Cancel</Button>
-          <Button @click="assignTransfer" :disabled="isAssigning">
+          <Button variant="outline" size="sm" @click="assignDialogOpen = false">Cancel</Button>
+          <Button size="sm" @click="assignTransfer" :disabled="isAssigning">
             <Loader2 v-if="isAssigning" class="mr-2 h-4 w-4 animate-spin" />
             Assign
           </Button>

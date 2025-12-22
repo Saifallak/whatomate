@@ -276,10 +276,10 @@ onMounted(() => {
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="isCreateDialogOpen = false">
+          <Button variant="outline" size="sm" @click="isCreateDialogOpen = false">
             Cancel
           </Button>
-          <Button @click="createAPIKey" :disabled="isCreating">
+          <Button size="sm" @click="createAPIKey" :disabled="isCreating">
             {{ isCreating ? 'Creating...' : 'Create Key' }}
           </Button>
         </DialogFooter>
@@ -324,7 +324,7 @@ onMounted(() => {
           </div>
         </div>
         <DialogFooter>
-          <Button @click="isKeyDisplayOpen = false">
+          <Button size="sm" @click="isKeyDisplayOpen = false">
             Done
           </Button>
         </DialogFooter>

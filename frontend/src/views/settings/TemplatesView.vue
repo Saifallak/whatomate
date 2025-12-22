@@ -819,8 +819,8 @@ function formatPreview(text: string, samples: any[]): string {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" @click="isDialogOpen = false">Cancel</Button>
-          <Button @click="saveTemplate" :disabled="isSubmitting">
+          <Button variant="outline" size="sm" @click="isDialogOpen = false">Cancel</Button>
+          <Button size="sm" @click="saveTemplate" :disabled="isSubmitting">
             <Loader2 v-if="isSubmitting" class="h-4 w-4 mr-2 animate-spin" />
             {{ editingTemplate ? 'Update' : 'Create' }} Template
           </Button>
@@ -897,9 +897,10 @@ function formatPreview(text: string, samples: any[]): string {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" @click="isPreviewOpen = false">Close</Button>
+          <Button variant="outline" size="sm" @click="isPreviewOpen = false">Close</Button>
           <Button
             v-if="previewTemplate?.status === 'DRAFT' || previewTemplate?.status === 'REJECTED'"
+            size="sm"
             @click="openPublishDialog(previewTemplate!); isPreviewOpen = false"
             :disabled="publishingTemplateId === previewTemplate?.id"
           >

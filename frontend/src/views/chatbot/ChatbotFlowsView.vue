@@ -986,8 +986,8 @@ function removeButton(step: FlowStep, index: number) {
               </div>
             </div>
             <DialogFooter class="flex-shrink-0 border-t pt-4">
-              <Button variant="outline" @click="isDialogOpen = false">Cancel</Button>
-              <Button @click="saveFlow" :disabled="isSubmitting">
+              <Button variant="outline" size="sm" @click="isDialogOpen = false">Cancel</Button>
+              <Button size="sm" @click="saveFlow" :disabled="isSubmitting">
                 {{ editingFlow ? 'Update' : 'Create' }} Flow
               </Button>
             </DialogFooter>

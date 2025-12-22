@@ -382,8 +382,8 @@ $: filteredRules.value = searchQuery.value
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" @click="isDialogOpen = false">Cancel</Button>
-              <Button @click="saveRule" :disabled="isSubmitting">
+              <Button variant="outline" size="sm" @click="isDialogOpen = false">Cancel</Button>
+              <Button size="sm" @click="saveRule" :disabled="isSubmitting">
                 {{ editingRule ? 'Update' : 'Create' }}
               </Button>
             </DialogFooter>

@@ -573,10 +573,10 @@ function formatDate(dateStr: string): string {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" @click="showCreateDialog = false" :disabled="isCreating">
+          <Button variant="outline" size="sm" @click="showCreateDialog = false" :disabled="isCreating">
             Cancel
           </Button>
-          <Button @click="createFlow" :disabled="isCreating">
+          <Button size="sm" @click="createFlow" :disabled="isCreating">
             <Loader2 v-if="isCreating" class="h-4 w-4 mr-2 animate-spin" />
             Create Flow
           </Button>
@@ -635,10 +635,10 @@ function formatDate(dateStr: string): string {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" @click="showEditDialog = false" :disabled="isUpdating">
+          <Button variant="outline" size="sm" @click="showEditDialog = false" :disabled="isUpdating">
             Cancel
           </Button>
-          <Button @click="updateFlow" :disabled="isUpdating">
+          <Button size="sm" @click="updateFlow" :disabled="isUpdating">
             <Loader2 v-if="isUpdating" class="h-4 w-4 mr-2 animate-spin" />
             Save Changes
           </Button>

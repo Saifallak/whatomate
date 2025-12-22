@@ -395,8 +395,8 @@ async function confirmDeleteContext() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" @click="isDialogOpen = false">Cancel</Button>
-              <Button @click="saveContext" :disabled="isSubmitting">
+              <Button variant="outline" size="sm" @click="isDialogOpen = false">Cancel</Button>
+              <Button size="sm" @click="saveContext" :disabled="isSubmitting">
                 {{ editingContext ? 'Update' : 'Create' }}
               </Button>
             </DialogFooter>

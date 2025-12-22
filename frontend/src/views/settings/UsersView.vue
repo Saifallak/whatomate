@@ -575,8 +575,8 @@ function goToPage(page: number) {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" @click="isDialogOpen = false">Cancel</Button>
-          <Button @click="saveUser" :disabled="isSubmitting">
+          <Button variant="outline" size="sm" @click="isDialogOpen = false">Cancel</Button>
+          <Button size="sm" @click="saveUser" :disabled="isSubmitting">
             <Loader2 v-if="isSubmitting" class="h-4 w-4 mr-2 animate-spin" />
             {{ editingUser ? 'Update' : 'Create' }} User
           </Button>
