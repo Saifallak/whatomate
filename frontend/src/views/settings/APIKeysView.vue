@@ -171,7 +171,7 @@ onMounted(() => {
           <h1 class="text-xl font-semibold">API Keys</h1>
           <p class="text-sm text-muted-foreground">Manage API keys for programmatic access</p>
         </div>
-        <Button @click="isCreateDialogOpen = true">
+        <Button variant="outline" size="sm" @click="isCreateDialogOpen = true">
           <Plus class="h-4 w-4 mr-2" />
           Create API Key
         </Button>

@@ -362,13 +362,14 @@ function formatDate(dateStr: string): string {
         <div class="flex gap-2">
           <Button
             variant="outline"
+            size="sm"
             @click="syncFlows"
             :disabled="isSyncing || !selectedAccount || selectedAccount === 'all'"
           >
             <RefreshCw :class="['h-4 w-4 mr-2', isSyncing && 'animate-spin']" />
             Sync from Meta
           </Button>
-          <Button @click="openCreateDialog">
+          <Button variant="outline" size="sm" @click="openCreateDialog">
             <Plus class="h-4 w-4 mr-2" />
             Create Flow
           </Button>

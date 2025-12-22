@@ -459,12 +459,12 @@ function formatPreview(text: string, samples: any[]): string {
           <p class="text-sm text-muted-foreground">Create and manage WhatsApp message templates</p>
         </div>
         <div class="flex items-center gap-2">
-          <Button variant="outline" @click="syncTemplates" :disabled="isSyncing || !selectedAccount || selectedAccount === 'all'">
+          <Button variant="outline" size="sm" @click="syncTemplates" :disabled="isSyncing || !selectedAccount || selectedAccount === 'all'">
             <Loader2 v-if="isSyncing" class="h-4 w-4 mr-2 animate-spin" />
             <RefreshCw v-else class="h-4 w-4 mr-2" />
             Sync from Meta
           </Button>
-          <Button @click="openCreateDialog">
+          <Button variant="outline" size="sm" @click="openCreateDialog">
             <Plus class="h-4 w-4 mr-2" />
             Create Template
           </Button>

@@ -686,7 +686,7 @@ async function addRecipientsFromCSV() {
         </div>
         <Dialog v-model:open="showCreateDialog">
           <DialogTrigger as-child>
-            <Button>
+            <Button variant="outline" size="sm">
               <Plus class="h-4 w-4 mr-2" />
               Create Campaign
             </Button>
