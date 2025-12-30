@@ -312,9 +312,9 @@ func (a *App) processStatusUpdate(phoneNumberID string, status WebhookStatus) {
 func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []WebhookStatusError) {
 	// Find the message by WhatsApp message ID
 	var message models.Message
-	result := a.DB.Where("whatsapp_message_id = ?", whatsappMsgID).First(&message)
+	result := a.DB.Where("whats_app_message_id = ?", whatsappMsgID).First(&message)
 	if result.Error != nil {
-		a.Log.Debug("No message found for status update", "whatsapp_message_id", whatsappMsgID)
+		a.Log.Debug("No message found for status update", "whats_app_message_id", whatsappMsgID)
 		return
 	}
 

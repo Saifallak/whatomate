@@ -18,6 +18,19 @@ export interface Contact {
   updated_at: string
 }
 
+export interface ReplyPreview {
+  id: string
+  content: any
+  message_type: string
+  direction: 'incoming' | 'outgoing'
+}
+
+export interface Reaction {
+  emoji: string
+  from_phone?: string
+  from_user?: string
+}
+
 export interface Message {
   id: string
   contact_id: string
@@ -44,6 +57,10 @@ export interface Message {
   status: string
   wamid?: string
   error_message?: string
+  is_reply?: boolean
+  reply_to_message_id?: string
+  reply_to_message?: ReplyPreview
+  reactions?: Reaction[]
   created_at: string
   updated_at: string
 }
@@ -55,6 +72,7 @@ export const useContactsStore = defineStore('contacts', () => {
   const isLoading = ref(false)
   const isLoadingMessages = ref(false)
   const searchQuery = ref('')
+  const replyingTo = ref<Message | null>(null)
 
   const filteredContacts = computed(() => {
     if (!searchQuery.value) return contacts.value
@@ -115,9 +133,9 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  async function sendMessage(contactId: string, type: string, content: any) {
+  async function sendMessage(contactId: string, type: string, content: any, replyToMessageId?: string) {
     try {
-      const response = await messagesService.send(contactId, { type, content })
+      const response = await messagesService.send(contactId, { type, content, reply_to_message_id: replyToMessageId })
       // API returns { status: "success", data: { ... } }
       const newMessage = response.data.data || response.data
       // Use addMessage which has duplicate checking (WebSocket may also broadcast this)
@@ -128,6 +146,14 @@ export const useContactsStore = defineStore('contacts', () => {
       console.error('Failed to send message:', error)
       throw error
     }
+  }
+
+  function setReplyingTo(message: Message | null) {
+    replyingTo.value = message
+  }
+
+  function clearReplyingTo() {
+    replyingTo.value = null
   }
 
   async function sendTemplate(contactId: string, templateName: string, components?: any[]) {
@@ -172,6 +198,7 @@ export const useContactsStore = defineStore('contacts', () => {
 
   function setCurrentContact(contact: Contact | null) {
     currentContact.value = contact
+    replyingTo.value = null // Clear reply state when switching contacts
     if (contact) {
       contact.unread_count = 0
     }
@@ -181,6 +208,13 @@ export const useContactsStore = defineStore('contacts', () => {
     messages.value = []
   }
 
+  function updateMessageReactions(messageId: string, reactions: Reaction[]) {
+    const message = messages.value.find(m => m.id === messageId)
+    if (message) {
+      message.reactions = reactions
+    }
+  }
+
   return {
     contacts,
     currentContact,
@@ -188,6 +222,7 @@ export const useContactsStore = defineStore('contacts', () => {
     isLoading,
     isLoadingMessages,
     searchQuery,
+    replyingTo,
     filteredContacts,
     sortedContacts,
     fetchContacts,
@@ -198,6 +233,9 @@ export const useContactsStore = defineStore('contacts', () => {
     addMessage,
     updateMessageStatus,
     setCurrentContact,
-    clearMessages
+    clearMessages,
+    setReplyingTo,
+    clearReplyingTo,
+    updateMessageReactions
   }
 })

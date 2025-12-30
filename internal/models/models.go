@@ -231,7 +231,7 @@ type Message struct {
 	OrganizationID    uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
 	WhatsAppAccount   string     `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
 	ContactID         uuid.UUID  `gorm:"type:uuid;index;not null" json:"contact_id"`
-	WhatsAppMessageID string     `gorm:"column:whatsapp_message_id;size:255;index" json:"whatsapp_message_id"`
+	WhatsAppMessageID string     `gorm:"column:whats_app_message_id;size:255;index" json:"whatsapp_message_id"`
 	ConversationID    string     `gorm:"size:255;index" json:"conversation_id"`
 	Direction         string     `gorm:"size:10;not null" json:"direction"`    // incoming, outgoing
 	MessageType       string     `gorm:"size:20;not null" json:"message_type"` // text, image, video, audio, document, template, interactive, flow, reaction, location, contact

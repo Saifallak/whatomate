@@ -137,10 +137,12 @@ export const contactsService = {
 export const messagesService = {
   list: (contactId: string, params?: { page?: number; limit?: number }) =>
     api.get(`/contacts/${contactId}/messages`, { params }),
-  send: (contactId: string, data: { type: string; content: any }) =>
+  send: (contactId: string, data: { type: string; content: any; reply_to_message_id?: string }) =>
     api.post(`/contacts/${contactId}/messages`, data),
   sendTemplate: (contactId: string, data: { template_name: string; components?: any[] }) =>
-    api.post(`/contacts/${contactId}/messages/template`, data)
+    api.post(`/contacts/${contactId}/messages/template`, data),
+  sendReaction: (contactId: string, messageId: string, emoji: string) =>
+    api.post(`/contacts/${contactId}/messages/${messageId}/reaction`, { emoji })
 }
 
 export const templatesService = {

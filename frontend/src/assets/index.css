@@ -137,6 +137,41 @@
   @apply opacity-100;
 }
 
+/* Reply preview inside chat bubble */
+.reply-preview {
+  @apply border-l-2 border-primary/50;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.dark .reply-preview {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.chat-bubble-outgoing .reply-preview {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Message highlight animation for scroll-to */
+@keyframes highlight-pulse {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: hsl(var(--primary) / 0.15); }
+}
+
+.highlight-message {
+  animation: highlight-pulse 0.5s ease-in-out 2;
+  border-radius: 0.5rem;
+}
+
+/* Reaction badges */
+.reaction-badge {
+  @apply text-sm px-1 py-0.5 rounded-full bg-muted/50;
+  font-size: 0.875rem;
+}
+
+.reactions-display {
+  margin-top: 4px;
+}
+
 /* Emoji picker dark theme override to match app dark blue theme */
 .dark .v3-emoji-picker.v3-color-theme-dark {
   --v3-picker-bg: hsl(222.2 84% 4.9%);

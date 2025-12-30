@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { wsService } from '@/services/websocket'
-import { contactsService, chatbotService } from '@/services/api'
+import { contactsService, chatbotService, messagesService } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -61,7 +61,10 @@ import {
   UserPlus,
   UserMinus,
   UserX,
-  Play
+  Play,
+  Reply,
+  X,
+  SmilePlus
 } from 'lucide-vue-next'
 import { formatTime, getInitials, truncate } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
@@ -77,6 +80,7 @@ const { isDark } = useColorMode()
 
 const messageInput = ref('')
 const messagesEndRef = ref<HTMLElement | null>(null)
+const messageInputRef = ref<InstanceType<typeof Textarea> | null>(null)
 const isSending = ref(false)
 const isAssignDialogOpen = ref(false)
 const isTransferring = ref(false)
@@ -253,15 +257,37 @@ async function sendMessage() {
     await contactsStore.sendMessage(
       contactsStore.currentContact.id,
       'text',
-      { body: messageInput.value }
+      { body: messageInput.value },
+      contactsStore.replyingTo?.id
     )
     messageInput.value = ''
+    contactsStore.clearReplyingTo()
     await nextTick()
     scrollToBottom()
   } catch (error) {
     toast.error('Failed to send message')
   } finally {
     isSending.value = false
+  }
+}
+
+function getReplyPreviewContent(message: Message): string {
+  if (!message.reply_to_message) return ''
+  const reply = message.reply_to_message
+  if (reply.message_type === 'text') {
+    const body = reply.content?.body || ''
+    return body.length > 50 ? body.substring(0, 50) + '...' : body
+  }
+  return `[${reply.message_type}]`
+}
+
+function scrollToMessage(messageId: string | undefined) {
+  if (!messageId) return
+  const messageEl = document.getElementById(`message-${messageId}`)
+  if (messageEl) {
+    messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    messageEl.classList.add('highlight-message')
+    setTimeout(() => messageEl.classList.remove('highlight-message'), 2000)
   }
 }
 
@@ -279,6 +305,43 @@ function closeCannedPicker() {
 function insertEmoji(emoji: string) {
   messageInput.value += emoji
   emojiPickerOpen.value = false
+}
+
+// Reaction handling
+const reactionPickerMessageId = ref<string | null>(null)
+const quickReactionEmojis = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+
+async function sendReaction(messageId: string, emoji: string) {
+  if (!contactsStore.currentContact) return
+
+  try {
+    const response = await messagesService.sendReaction(
+      contactsStore.currentContact.id,
+      messageId,
+      emoji
+    )
+    // Update will come via WebSocket, but we can update locally for immediate feedback
+    const data = response.data.data || response.data
+    contactsStore.updateMessageReactions(messageId, data.reactions)
+  } catch (error) {
+    toast.error('Failed to send reaction')
+  }
+  reactionPickerMessageId.value = null
+}
+
+function toggleReactionPicker(messageId: string) {
+  if (reactionPickerMessageId.value === messageId) {
+    reactionPickerMessageId.value = null
+  } else {
+    reactionPickerMessageId.value = messageId
+  }
+}
+
+function replyToMessage(message: Message) {
+  contactsStore.setReplyingTo(message)
+  nextTick(() => {
+    messageInputRef.value?.$el?.focus()
+  })
 }
 
 // Watch for slash commands in message input
@@ -841,8 +904,9 @@ async function sendMediaMessage() {
             <div
               v-for="message in contactsStore.messages"
               :key="message.id"
+              :id="`message-${message.id}`"
               :class="[
-                'flex',
+                'flex group',
                 message.direction === 'outgoing' ? 'justify-end' : 'justify-start'
               ]"
             >
@@ -852,6 +916,19 @@ async function sendMediaMessage() {
                   message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming'
                 ]"
               >
+                <!-- Reply preview (if this message is replying to another) -->
+                <div
+                  v-if="message.is_reply && message.reply_to_message"
+                  class="reply-preview mb-2 p-2 rounded-lg cursor-pointer text-xs"
+                  @click="scrollToMessage(message.reply_to_message_id)"
+                >
+                  <p class="font-medium opacity-70">
+                    {{ message.reply_to_message.direction === 'incoming' ? (contactsStore.currentContact?.profile_name || contactsStore.currentContact?.name || 'Customer') : 'You' }}
+                  </p>
+                  <p class="opacity-60 truncate">
+                    {{ getReplyPreviewContent(message) }}
+                  </p>
+                </div>
                 <!-- Image message -->
                 <div v-if="message.message_type === 'image' && message.media_url" class="mb-2">
                   <div v-if="isMediaLoading(message)" class="w-[200px] h-[150px] bg-muted rounded-lg animate-pulse flex items-center justify-center">
@@ -951,11 +1028,103 @@ async function sendMediaMessage() {
                     :class="['h-3 w-3', getMessageStatusClass(message.status)]"
                   />
                 </div>
+                <!-- Reactions display -->
+                <div
+                  v-if="message.reactions && message.reactions.length > 0"
+                  class="reactions-display flex flex-wrap gap-1 mt-1"
+                >
+                  <span
+                    v-for="(reaction, idx) in message.reactions"
+                    :key="idx"
+                    class="reaction-badge"
+                    :title="reaction.from_phone || reaction.from_user || ''"
+                  >
+                    {{ reaction.emoji }}
+                  </span>
+                </div>
+              </div>
+              <!-- Action buttons for incoming messages -->
+              <div v-if="message.direction === 'incoming'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
+                <Popover :open="reactionPickerMessageId === message.id" @update:open="(open: boolean) => reactionPickerMessageId = open ? message.id : null">
+                  <PopoverTrigger as-child>
+                    <Button variant="ghost" size="icon" class="h-6 w-6">
+                      <SmilePlus class="h-3 w-3" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" class="w-auto p-2">
+                    <div class="flex gap-1">
+                      <button
+                        v-for="emoji in quickReactionEmojis"
+                        :key="emoji"
+                        class="text-lg hover:bg-muted p-1 rounded cursor-pointer"
+                        @click="sendReaction(message.id, emoji)"
+                      >
+                        {{ emoji }}
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6"
+                  @click="replyToMessage(message)"
+                >
+                  <Reply class="h-3 w-3" />
+                </Button>
+              </div>
+              <!-- Reply button for outgoing messages (shown on hover) -->
+              <div v-if="message.direction === 'outgoing'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
+                <Popover :open="reactionPickerMessageId === message.id" @update:open="(open: boolean) => reactionPickerMessageId = open ? message.id : null">
+                  <PopoverTrigger as-child>
+                    <Button variant="ghost" size="icon" class="h-6 w-6">
+                      <SmilePlus class="h-3 w-3" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" class="w-auto p-2">
+                    <div class="flex gap-1">
+                      <button
+                        v-for="emoji in quickReactionEmojis"
+                        :key="emoji"
+                        class="text-lg hover:bg-muted p-1 rounded cursor-pointer"
+                        @click="sendReaction(message.id, emoji)"
+                      >
+                        {{ emoji }}
+                      </button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6"
+                  @click="replyToMessage(message)"
+                >
+                  <Reply class="h-3 w-3" />
+                </Button>
               </div>
             </div>
             <div ref="messagesEndRef" />
           </div>
         </ScrollArea>
+
+        <!-- Reply indicator -->
+        <div
+          v-if="contactsStore.replyingTo"
+          class="px-3 py-2 border-t bg-muted/50 flex items-center justify-between"
+        >
+          <div class="flex-1 min-w-0">
+            <p class="text-xs font-medium text-muted-foreground">
+              Replying to {{ contactsStore.replyingTo.direction === 'incoming' ? (contactsStore.currentContact?.profile_name || contactsStore.currentContact?.name || 'Customer') : 'Yourself' }}
+            </p>
+            <p class="text-sm truncate">
+              {{ getMessageContent(contactsStore.replyingTo) || '[Media]' }}
+            </p>
+          </div>
+          <Button variant="ghost" size="icon" class="h-6 w-6 shrink-0" @click="contactsStore.clearReplyingTo">
+            <X class="h-4 w-4" />
+          </Button>
+        </div>
 
         <!-- Message Input -->
         <div class="px-3 py-2 border-t bg-card">
@@ -1014,6 +1183,7 @@ async function sendMediaMessage() {
               />
             </div>
             <Textarea
+              ref="messageInputRef"
               v-model="messageInput"
               placeholder="Type a message..."
               class="flex-1 min-h-[36px] max-h-[100px] resize-none text-sm"

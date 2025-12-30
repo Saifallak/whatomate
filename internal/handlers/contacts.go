@@ -41,20 +41,39 @@ type ContactResponse struct {
 
 // MessageResponse represents a message for the frontend
 type MessageResponse struct {
-	ID              uuid.UUID    `json:"id"`
-	ContactID       uuid.UUID    `json:"contact_id"`
-	Direction       string       `json:"direction"`
-	MessageType     string       `json:"message_type"`
-	Content         any          `json:"content"`
-	MediaURL        string       `json:"media_url,omitempty"`
-	MediaMimeType   string       `json:"media_mime_type,omitempty"`
-	MediaFilename   string       `json:"media_filename,omitempty"`
-	InteractiveData models.JSONB `json:"interactive_data,omitempty"`
-	Status          string       `json:"status"`
-	WAMID           string       `json:"wamid"`
-	Error           string       `json:"error_message"`
-	CreatedAt       time.Time    `json:"created_at"`
-	UpdatedAt       time.Time    `json:"updated_at"`
+	ID               uuid.UUID      `json:"id"`
+	ContactID        uuid.UUID      `json:"contact_id"`
+	Direction        string         `json:"direction"`
+	MessageType      string         `json:"message_type"`
+	Content          any            `json:"content"`
+	MediaURL         string         `json:"media_url,omitempty"`
+	MediaMimeType    string         `json:"media_mime_type,omitempty"`
+	MediaFilename    string         `json:"media_filename,omitempty"`
+	InteractiveData  models.JSONB   `json:"interactive_data,omitempty"`
+	Status           string         `json:"status"`
+	WAMID            string         `json:"wamid"`
+	Error            string         `json:"error_message"`
+	IsReply          bool           `json:"is_reply"`
+	ReplyToMessageID *string        `json:"reply_to_message_id,omitempty"`
+	ReplyToMessage   *ReplyPreview  `json:"reply_to_message,omitempty"`
+	Reactions        []ReactionInfo `json:"reactions,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+}
+
+// ReplyPreview contains a preview of the replied-to message
+type ReplyPreview struct {
+	ID          string `json:"id"`
+	Content     any    `json:"content"`
+	MessageType string `json:"message_type"`
+	Direction   string `json:"direction"`
+}
+
+// ReactionInfo represents a reaction on a message
+type ReactionInfo struct {
+	Emoji     string `json:"emoji"`
+	FromPhone string `json:"from_phone,omitempty"`
+	FromUser  string `json:"from_user,omitempty"`
 }
 
 // ListContacts returns all contacts for the organization
@@ -265,7 +284,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 		offset = 0
 	}
 
-	if err := msgQuery.Order("created_at ASC").Offset(offset).Limit(limit).Find(&messages).Error; err != nil {
+	if err := msgQuery.Preload("ReplyToMessage").Order("created_at ASC").Offset(offset).Limit(limit).Find(&messages).Error; err != nil {
 		a.Log.Error("Failed to list messages", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 	}
@@ -281,7 +300,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 			content = map[string]string{"body": m.Content}
 		}
 
-		response[i] = MessageResponse{
+		msgResp := MessageResponse{
 			ID:              m.ID,
 			ContactID:       m.ContactID,
 			Direction:       m.Direction,
@@ -294,9 +313,46 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 			Status:          m.Status,
 			WAMID:           m.WhatsAppMessageID,
 			Error:           m.ErrorMessage,
+			IsReply:         m.IsReply,
 			CreatedAt:       m.CreatedAt,
 			UpdatedAt:       m.UpdatedAt,
 		}
+
+		// Add reply context if this is a reply
+		if m.IsReply && m.ReplyToMessageID != nil {
+			replyToID := m.ReplyToMessageID.String()
+			msgResp.ReplyToMessageID = &replyToID
+			if m.ReplyToMessage != nil {
+				msgResp.ReplyToMessage = &ReplyPreview{
+					ID:          m.ReplyToMessage.ID.String(),
+					Content:     map[string]string{"body": m.ReplyToMessage.Content},
+					MessageType: m.ReplyToMessage.MessageType,
+					Direction:   m.ReplyToMessage.Direction,
+				}
+			}
+		}
+
+		// Extract reactions from Metadata
+		if m.Metadata != nil {
+			if reactionsRaw, ok := m.Metadata["reactions"]; ok {
+				if reactionsArray, ok := reactionsRaw.([]interface{}); ok {
+					for _, r := range reactionsArray {
+						if rMap, ok := r.(map[string]interface{}); ok {
+							emoji, _ := rMap["emoji"].(string)
+							fromPhone, _ := rMap["from_phone"].(string)
+							fromUser, _ := rMap["from_user"].(string)
+							msgResp.Reactions = append(msgResp.Reactions, ReactionInfo{
+								Emoji:     emoji,
+								FromPhone: fromPhone,
+								FromUser:  fromUser,
+							})
+						}
+					}
+				}
+			}
+		}
+
+		response[i] = msgResp
 	}
 
 	// Mark incoming messages as read
@@ -321,6 +377,7 @@ type SendMessageRequest struct {
 	Content struct {
 		Body string `json:"body"`
 	} `json:"content"`
+	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
 }
 
 // SendMessage sends a message to a contact
@@ -381,6 +438,20 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 		SentByUserID:    &userID,
 	}
 
+	// Handle reply context
+	var replyToMessage *models.Message
+	if req.ReplyToMessageID != "" {
+		replyToID, err := uuid.Parse(req.ReplyToMessageID)
+		if err == nil {
+			var replyTo models.Message
+			if err := a.DB.Where("id = ? AND contact_id = ?", replyToID, contactID).First(&replyTo).Error; err == nil {
+				message.IsReply = true
+				message.ReplyToMessageID = &replyToID
+				replyToMessage = &replyTo
+			}
+		}
+	}
+
 	if err := a.DB.Create(&message).Error; err != nil {
 		a.Log.Error("Failed to create message", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create message", nil, "")
@@ -403,24 +474,48 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 		MessageType: message.MessageType,
 		Content:     map[string]string{"body": message.Content},
 		Status:      message.Status,
+		IsReply:     message.IsReply,
 		CreatedAt:   message.CreatedAt,
 		UpdatedAt:   message.UpdatedAt,
 	}
 
+	// Add reply context to response
+	if message.IsReply && message.ReplyToMessageID != nil && replyToMessage != nil {
+		replyToID := message.ReplyToMessageID.String()
+		response.ReplyToMessageID = &replyToID
+		response.ReplyToMessage = &ReplyPreview{
+			ID:          replyToMessage.ID.String(),
+			Content:     map[string]string{"body": replyToMessage.Content},
+			MessageType: replyToMessage.MessageType,
+			Direction:   replyToMessage.Direction,
+		}
+	}
+
 	// Broadcast new outgoing message via WebSocket
 	if a.WSHub != nil {
+		wsPayload := map[string]any{
+			"id":           message.ID,
+			"contact_id":   message.ContactID,
+			"direction":    message.Direction,
+			"message_type": message.MessageType,
+			"content":      map[string]string{"body": message.Content},
+			"status":       message.Status,
+			"created_at":   message.CreatedAt,
+			"updated_at":   message.UpdatedAt,
+			"is_reply":     message.IsReply,
+		}
+		if message.IsReply && message.ReplyToMessageID != nil && replyToMessage != nil {
+			wsPayload["reply_to_message_id"] = message.ReplyToMessageID.String()
+			wsPayload["reply_to_message"] = map[string]any{
+				"id":           replyToMessage.ID.String(),
+				"content":      map[string]string{"body": replyToMessage.Content},
+				"message_type": replyToMessage.MessageType,
+				"direction":    replyToMessage.Direction,
+			}
+		}
 		a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
-			Type: websocket.TypeNewMessage,
-			Payload: map[string]any{
-				"id":           message.ID,
-				"contact_id":   message.ContactID,
-				"direction":    message.Direction,
-				"message_type": message.MessageType,
-				"content":      map[string]string{"body": message.Content},
-				"status":       message.Status,
-				"created_at":   message.CreatedAt,
-				"updated_at":   message.UpdatedAt,
-			},
+			Type:    websocket.TypeNewMessage,
+			Payload: wsPayload,
 		})
 	}
 
@@ -442,6 +537,16 @@ func (a *App) sendWhatsAppMessage(account *models.WhatsAppAccount, contact *mode
 		payload["text"] = map[string]any{
 			"preview_url": false,
 			"body":        message.Content,
+		}
+	}
+
+	// Add reply context if this is a reply
+	if message.IsReply && message.ReplyToMessageID != nil {
+		var replyToMsg models.Message
+		if err := a.DB.First(&replyToMsg, message.ReplyToMessageID).Error; err == nil && replyToMsg.WhatsAppMessageID != "" {
+			payload["context"] = map[string]any{
+				"message_id": replyToMsg.WhatsAppMessageID,
+			}
 		}
 	}
 
@@ -511,8 +616,8 @@ func (a *App) sendWhatsAppMessage(account *models.WhatsAppAccount, contact *mode
 
 	if len(result.Messages) > 0 {
 		a.DB.Model(message).Updates(map[string]any{
-			"status":              "sent",
-			"whatsapp_message_id": result.Messages[0].ID,
+			"status":               "sent",
+			"whats_app_message_id": result.Messages[0].ID,
 		})
 		a.Log.Info("Message sent successfully", "message_id", result.Messages[0].ID, "to", contact.PhoneNumber)
 
@@ -764,6 +869,194 @@ func (a *App) saveMediaLocally(data []byte, mimeType, filename string) (string, 
 	return relativePath, nil
 }
 
+// SendReactionRequest represents a request to send a reaction
+type SendReactionRequest struct {
+	Emoji string `json:"emoji"` // Empty string to remove reaction
+}
+
+// SendReaction sends a reaction to a message
+func (a *App) SendReaction(r *fastglue.Request) error {
+	orgID := r.RequestCtx.UserValue("organization_id").(uuid.UUID)
+	userID, _ := r.RequestCtx.UserValue("user_id").(uuid.UUID)
+	userRole, _ := r.RequestCtx.UserValue("role").(string)
+	contactIDStr := r.RequestCtx.UserValue("id").(string)
+	messageIDStr := r.RequestCtx.UserValue("message_id").(string)
+
+	contactID, err := uuid.Parse(contactIDStr)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid contact ID", nil, "")
+	}
+
+	messageID, err := uuid.Parse(messageIDStr)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid message ID", nil, "")
+	}
+
+	// Parse request body
+	var req SendReactionRequest
+	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+
+	// Get contact (agents can only react to messages in their assigned contacts)
+	var contact models.Contact
+	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
+	if userRole == "agent" {
+		query = query.Where("assigned_user_id = ?", userID)
+	}
+	if err := query.First(&contact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+
+	// Get message
+	var message models.Message
+	if err := a.DB.Where("id = ? AND contact_id = ?", messageID, contactID).First(&message).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Message not found", nil, "")
+	}
+
+	// Get WhatsApp account
+	var account models.WhatsAppAccount
+	if contact.WhatsAppAccount != "" {
+		if err := a.DB.Where("name = ? AND organization_id = ?", contact.WhatsAppAccount, orgID).First(&account).Error; err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
+		}
+	} else {
+		if err := a.DB.Where("organization_id = ? AND is_default_outgoing = ?", orgID, true).First(&account).Error; err != nil {
+			if err := a.DB.Where("organization_id = ?", orgID).First(&account).Error; err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No WhatsApp account configured", nil, "")
+			}
+		}
+	}
+
+	// Parse existing reactions from Metadata
+	var metadata map[string]interface{}
+	if message.Metadata != nil {
+		metadata = message.Metadata
+	} else {
+		metadata = make(map[string]interface{})
+	}
+
+	// Get or initialize reactions array
+	type Reaction struct {
+		Emoji     string `json:"emoji"`
+		FromPhone string `json:"from_phone,omitempty"`
+		FromUser  string `json:"from_user,omitempty"`
+	}
+	var reactions []Reaction
+	if reactionsRaw, ok := metadata["reactions"]; ok {
+		if reactionsArray, ok := reactionsRaw.([]interface{}); ok {
+			for _, r := range reactionsArray {
+				if rMap, ok := r.(map[string]interface{}); ok {
+					emoji, _ := rMap["emoji"].(string)
+					fromPhone, _ := rMap["from_phone"].(string)
+					fromUser, _ := rMap["from_user"].(string)
+					reactions = append(reactions, Reaction{
+						Emoji:     emoji,
+						FromPhone: fromPhone,
+						FromUser:  fromUser,
+					})
+				}
+			}
+		}
+	}
+
+	// Remove existing reaction from this user (each user can only have one reaction)
+	userIDStr := userID.String()
+	var newReactions []Reaction
+	for _, r := range reactions {
+		if r.FromUser != userIDStr {
+			newReactions = append(newReactions, r)
+		}
+	}
+
+	// Add new reaction if emoji is not empty
+	if req.Emoji != "" {
+		newReactions = append(newReactions, Reaction{
+			Emoji:    req.Emoji,
+			FromUser: userIDStr,
+		})
+	}
+
+	// Update metadata
+	metadata["reactions"] = newReactions
+	if err := a.DB.Model(&message).Update("metadata", metadata).Error; err != nil {
+		a.Log.Error("Failed to update message reactions", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update reaction", nil, "")
+	}
+
+	// Send reaction to WhatsApp API
+	go a.sendWhatsAppReaction(&account, &contact, &message, req.Emoji)
+
+	// Broadcast via WebSocket
+	if a.WSHub != nil {
+		a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+			Type: "reaction_update",
+			Payload: map[string]any{
+				"message_id": message.ID.String(),
+				"contact_id": contact.ID.String(),
+				"reactions":  newReactions,
+			},
+		})
+	}
+
+	return r.SendEnvelope(map[string]any{
+		"message_id": message.ID.String(),
+		"reactions":  newReactions,
+	})
+}
+
+// sendWhatsAppReaction sends a reaction to WhatsApp
+func (a *App) sendWhatsAppReaction(account *models.WhatsAppAccount, contact *models.Contact, message *models.Message, emoji string) {
+	if message.WhatsAppMessageID == "" {
+		a.Log.Warn("Cannot send reaction - message has no WhatsApp ID", "message_id", message.ID)
+		return
+	}
+
+	url := fmt.Sprintf("https://graph.facebook.com/%s/%s/messages", account.APIVersion, account.PhoneID)
+
+	payload := map[string]any{
+		"messaging_product": "whatsapp",
+		"recipient_type":    "individual",
+		"to":                contact.PhoneNumber,
+		"type":              "reaction",
+		"reaction": map[string]any{
+			"message_id": message.WhatsAppMessageID,
+			"emoji":      emoji, // Empty string removes the reaction
+		},
+	}
+
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		a.Log.Error("Failed to marshal reaction payload", "error", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		a.Log.Error("Failed to create reaction request", "error", err)
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+account.AccessToken)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		a.Log.Error("Failed to send reaction", "error", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		a.Log.Error("WhatsApp API reaction error", "status", resp.StatusCode, "body", string(body))
+		return
+	}
+
+	a.Log.Info("Reaction sent successfully", "message_id", message.WhatsAppMessageID, "emoji", emoji)
+}
+
 // uploadAndSendMediaMessage uploads media to WhatsApp and sends the message
 func (a *App) uploadAndSendMediaMessage(waAccount *whatsapp.Account, account *models.WhatsAppAccount, contact *models.Contact, message *models.Message, data []byte, mimeType, filename, caption string) {
 	ctx := context.Background()
@@ -805,8 +1098,8 @@ func (a *App) uploadAndSendMediaMessage(waAccount *whatsapp.Account, account *mo
 
 	// Update message with WhatsApp message ID
 	a.DB.Model(message).Updates(map[string]any{
-		"status":              "sent",
-		"whatsapp_message_id": wamID,
+		"status":               "sent",
+		"whats_app_message_id": wamID,
 	})
 
 	a.Log.Info("Media message sent", "message_id", message.ID, "wamid", wamID, "type", message.MessageType)

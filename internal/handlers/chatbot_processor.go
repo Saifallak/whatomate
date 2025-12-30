@@ -62,6 +62,14 @@ type IncomingTextMessage struct {
 		SHA256   string `json:"sha256"`
 		Caption  string `json:"caption,omitempty"`
 	} `json:"video,omitempty"`
+	Context *struct {
+		From string `json:"from"`
+		ID   string `json:"id"` // WhatsApp message ID being replied to
+	} `json:"context,omitempty"`
+	Reaction *struct {
+		MessageID string `json:"message_id"` // WhatsApp message ID being reacted to
+		Emoji     string `json:"emoji"`      // The emoji reaction (empty string = remove reaction)
+	} `json:"reaction,omitempty"`
 }
 
 // processIncomingMessageFull processes incoming WhatsApp messages with chatbot logic
@@ -77,6 +85,12 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	var account models.WhatsAppAccount
 	if err := a.DB.Where("phone_id = ?", phoneNumberID).First(&account).Error; err != nil {
 		a.Log.Error("WhatsApp account not found", "phone_id", phoneNumberID, "error", err)
+		return
+	}
+
+	// Handle reaction messages specially - they update existing messages, not create new ones
+	if msg.Type == "reaction" && msg.Reaction != nil {
+		a.handleIncomingReaction(&account, msg.From, msg.Reaction.MessageID, msg.Reaction.Emoji, profileName)
 		return
 	}
 
@@ -187,7 +201,11 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 
 	// Save incoming message to messages table (always, even if chatbot is disabled)
-	a.saveIncomingMessage(&account, contact, msg.ID, messageType, messageText, mediaInfo)
+	var replyToWAMID string
+	if msg.Context != nil && msg.Context.ID != "" {
+		replyToWAMID = msg.Context.ID
+	}
+	a.saveIncomingMessage(&account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID)
 
 	// Check for active agent transfer - skip chatbot processing if transferred
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
@@ -1842,6 +1860,106 @@ func (a *App) getSessionHistory(sessionID uuid.UUID, limit int) []models.Chatbot
 	return messages
 }
 
+// Reaction represents a reaction on a message
+type Reaction struct {
+	Emoji     string `json:"emoji"`
+	FromPhone string `json:"from_phone,omitempty"` // Phone number if from contact
+	FromUser  string `json:"from_user,omitempty"`  // User ID if from agent
+}
+
+// handleIncomingReaction handles incoming reaction messages from WhatsApp
+func (a *App) handleIncomingReaction(account *models.WhatsAppAccount, fromPhone, messageWAMID, emoji, profileName string) {
+	a.Log.Info("Handling incoming reaction",
+		"from", fromPhone,
+		"message_wamid", messageWAMID,
+		"emoji", emoji,
+	)
+
+	// Find the message being reacted to
+	var message models.Message
+	if err := a.DB.Where("whats_app_message_id = ?", messageWAMID).First(&message).Error; err != nil {
+		a.Log.Warn("Message not found for reaction", "wamid", messageWAMID)
+		return
+	}
+
+	// Get or create contact
+	contact, _ := a.getOrCreateContact(account.OrganizationID, fromPhone, profileName)
+
+	// Parse existing reactions from Metadata
+	var metadata map[string]interface{}
+	if message.Metadata != nil {
+		metadata = message.Metadata
+	} else {
+		metadata = make(map[string]interface{})
+	}
+
+	// Get or initialize reactions array
+	var reactions []Reaction
+	if reactionsRaw, ok := metadata["reactions"]; ok {
+		if reactionsArray, ok := reactionsRaw.([]interface{}); ok {
+			for _, r := range reactionsArray {
+				if rMap, ok := r.(map[string]interface{}); ok {
+					emoji, _ := rMap["emoji"].(string)
+					reactions = append(reactions, Reaction{
+						Emoji:     emoji,
+						FromPhone: getStringFromMap(rMap, "from_phone"),
+						FromUser:  getStringFromMap(rMap, "from_user"),
+					})
+				}
+			}
+		}
+	}
+
+	// Remove existing reaction from this contact (each contact can only have one reaction)
+	var newReactions []Reaction
+	for _, r := range reactions {
+		if r.FromPhone != fromPhone {
+			newReactions = append(newReactions, r)
+		}
+	}
+
+	// Add new reaction if emoji is not empty (empty = remove reaction)
+	if emoji != "" {
+		newReactions = append(newReactions, Reaction{
+			Emoji:     emoji,
+			FromPhone: fromPhone,
+		})
+	}
+
+	// Update metadata
+	metadata["reactions"] = newReactions
+
+	// Save to database
+	if err := a.DB.Model(&message).Update("metadata", metadata).Error; err != nil {
+		a.Log.Error("Failed to update message reactions", "error", err)
+		return
+	}
+
+	a.Log.Info("Updated message reaction", "message_id", message.ID, "reactions_count", len(newReactions))
+
+	// Broadcast via WebSocket
+	if a.WSHub != nil {
+		a.WSHub.BroadcastToOrg(account.OrganizationID, websocket.WSMessage{
+			Type: "reaction_update",
+			Payload: map[string]any{
+				"message_id": message.ID.String(),
+				"contact_id": contact.ID.String(),
+				"reactions":  newReactions,
+			},
+		})
+	}
+}
+
+// Helper function to safely get string from map
+func getStringFromMap(m map[string]interface{}, key string) string {
+	if v, ok := m[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
 // MediaInfo holds media-related information for an incoming message
 type MediaInfo struct {
 	MediaURL      string
@@ -1850,7 +1968,7 @@ type MediaInfo struct {
 }
 
 // saveIncomingMessage saves an incoming message to the messages table
-func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo) {
+func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID string) {
 	now := time.Now()
 
 	message := models.Message{
@@ -1863,6 +1981,17 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		MessageType:       msgType,
 		Content:           content,
 		Status:            "received",
+	}
+
+	// Handle reply context - look up the original message by WhatsApp message ID
+	if replyToWAMID != "" {
+		var replyToMsg models.Message
+		if err := a.DB.Where("whats_app_message_id = ?", replyToWAMID).First(&replyToMsg).Error; err == nil {
+			message.IsReply = true
+			message.ReplyToMessageID = &replyToMsg.ID
+		} else {
+			a.Log.Warn("Reply-to message not found", "reply_to_wamid", replyToWAMID)
+		}
 	}
 
 	// Add media fields if present
@@ -1901,24 +2030,40 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		if contact.AssignedUserID != nil {
 			assignedUserIDStr = contact.AssignedUserID.String()
 		}
+		wsPayload := map[string]any{
+			"id":               message.ID.String(),
+			"contact_id":       contact.ID.String(),
+			"assigned_user_id": assignedUserIDStr,
+			"profile_name":     contact.ProfileName,
+			"direction":        message.Direction,
+			"message_type":     message.MessageType,
+			"content":          map[string]string{"body": message.Content},
+			"media_url":        message.MediaURL,
+			"media_mime_type":  message.MediaMimeType,
+			"media_filename":   message.MediaFilename,
+			"status":           message.Status,
+			"wamid":            message.WhatsAppMessageID,
+			"created_at":       message.CreatedAt,
+			"updated_at":       message.UpdatedAt,
+			"is_reply":         message.IsReply,
+		}
+		// Include reply context if this is a reply
+		if message.IsReply && message.ReplyToMessageID != nil {
+			wsPayload["reply_to_message_id"] = message.ReplyToMessageID.String()
+			// Load the replied-to message for preview
+			var replyToMsg models.Message
+			if err := a.DB.First(&replyToMsg, message.ReplyToMessageID).Error; err == nil {
+				wsPayload["reply_to_message"] = map[string]any{
+					"id":           replyToMsg.ID.String(),
+					"content":      map[string]string{"body": replyToMsg.Content},
+					"message_type": replyToMsg.MessageType,
+					"direction":    replyToMsg.Direction,
+				}
+			}
+		}
 		a.WSHub.BroadcastToOrg(account.OrganizationID, websocket.WSMessage{
-			Type: websocket.TypeNewMessage,
-			Payload: map[string]any{
-				"id":               message.ID.String(),
-				"contact_id":       contact.ID.String(),
-				"assigned_user_id": assignedUserIDStr,
-				"profile_name":     contact.ProfileName,
-				"direction":        message.Direction,
-				"message_type":     message.MessageType,
-				"content":          map[string]string{"body": message.Content},
-				"media_url":        message.MediaURL,
-				"media_mime_type":  message.MediaMimeType,
-				"media_filename":   message.MediaFilename,
-				"status":           message.Status,
-				"wamid":            message.WhatsAppMessageID,
-				"created_at":       message.CreatedAt,
-				"updated_at":       message.UpdatedAt,
-			},
+			Type:    websocket.TypeNewMessage,
+			Payload: wsPayload,
 		})
 	}
 

@@ -45,6 +45,9 @@ const WS_TYPE_SET_CONTACT = 'set_contact'
 const WS_TYPE_PING = 'ping'
 const WS_TYPE_PONG = 'pong'
 
+// Reaction types
+const WS_TYPE_REACTION_UPDATE = 'reaction_update'
+
 // Agent transfer types
 const WS_TYPE_AGENT_TRANSFER = 'agent_transfer'
 const WS_TYPE_AGENT_TRANSFER_RESUME = 'agent_transfer_resume'
@@ -139,6 +142,9 @@ class WebSocketService {
         case WS_TYPE_AGENT_TRANSFER_ASSIGN:
           this.handleAgentTransferAssign(message.payload)
           break
+        case WS_TYPE_REACTION_UPDATE:
+          this.handleReactionUpdate(store, message.payload)
+          break
         case WS_TYPE_PONG:
           // Pong received, connection is alive
           break
@@ -178,6 +184,10 @@ class WebSocketService {
         status: payload.status,
         wamid: payload.wamid,
         error_message: payload.error_message,
+        is_reply: payload.is_reply,
+        reply_to_message_id: payload.reply_to_message_id,
+        reply_to_message: payload.reply_to_message,
+        reactions: payload.reactions,
         created_at: payload.created_at,
         updated_at: payload.updated_at
       })
@@ -226,6 +236,14 @@ class WebSocketService {
 
   private handleStatusUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {
     store.updateMessageStatus(payload.message_id, payload.status)
+  }
+
+  private handleReactionUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {
+    // Update the message reactions if we're viewing the contact
+    const currentContact = store.currentContact
+    if (currentContact && payload.contact_id === currentContact.id) {
+      store.updateMessageReactions(payload.message_id, payload.reactions)
+    }
   }
 
   private handleAgentTransfer(payload: any) {

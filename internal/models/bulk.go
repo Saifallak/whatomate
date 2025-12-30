@@ -43,7 +43,7 @@ type BulkMessageRecipient struct {
 	RecipientName      string     `gorm:"size:255" json:"recipient_name"`
 	TemplateParams     JSONB      `gorm:"type:jsonb;default:'{}'" json:"template_params"`
 	Status             string     `gorm:"size:20;default:'pending'" json:"status"` // pending, sent, delivered, read, failed
-	WhatsAppMessageID  string     `gorm:"column:whatsapp_message_id;size:100;index" json:"whatsapp_message_id,omitempty"`
+	WhatsAppMessageID  string     `gorm:"column:whats_app_message_id;size:100;index" json:"whatsapp_message_id,omitempty"`
 	MessageID          *uuid.UUID `gorm:"type:uuid" json:"message_id,omitempty"`
 	ErrorMessage       string     `gorm:"type:text" json:"error_message"`
 	SentAt             *time.Time `json:"sent_at,omitempty"`
