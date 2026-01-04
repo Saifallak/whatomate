@@ -74,7 +74,7 @@ func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, n
 
 	// 1. Auto-close expired transfers
 	if settings.SLAAutoCloseHours > 0 {
-		p.autoCloseExpiredTransfers(orgID, now)
+		p.autoCloseExpiredTransfers(orgID, settings, now)
 	}
 
 	// 2. Escalate transfers past escalation deadline
@@ -89,7 +89,7 @@ func (p *SLAProcessor) processOrganizationSLA(settings models.ChatbotSettings, n
 }
 
 // autoCloseExpiredTransfers closes transfers that have exceeded their expiry time
-func (p *SLAProcessor) autoCloseExpiredTransfers(orgID uuid.UUID, now time.Time) {
+func (p *SLAProcessor) autoCloseExpiredTransfers(orgID uuid.UUID, settings models.ChatbotSettings, now time.Time) {
 	var transfers []models.AgentTransfer
 	if err := p.app.DB.Where(
 		"organization_id = ? AND status = ? AND expires_at IS NOT NULL AND expires_at < ?",
@@ -100,6 +100,11 @@ func (p *SLAProcessor) autoCloseExpiredTransfers(orgID uuid.UUID, now time.Time)
 	}
 
 	for _, transfer := range transfers {
+		// Send auto-close message to customer if configured
+		if settings.SLAAutoCloseMessage != "" {
+			p.sendSLAAutoCloseToCustomer(transfer, settings.SLAAutoCloseMessage)
+		}
+
 		// Update transfer status
 		if err := p.app.DB.Model(&transfer).Updates(map[string]interface{}{
 			"status":     "expired",
@@ -270,6 +275,35 @@ func (p *SLAProcessor) sendSLAWarningToCustomer(transfer models.AgentTransfer, m
 	}
 
 	p.app.Log.Info("SLA warning message sent to customer", "phone", transfer.PhoneNumber, "transfer_id", transfer.ID)
+}
+
+// sendSLAAutoCloseToCustomer sends an auto-close notification message to the customer
+func (p *SLAProcessor) sendSLAAutoCloseToCustomer(transfer models.AgentTransfer, message string) {
+	// Get WhatsApp account
+	var account models.WhatsAppAccount
+	if err := p.app.DB.Where("name = ?", transfer.WhatsAppAccount).First(&account).Error; err != nil {
+		p.app.Log.Error("Failed to load WhatsApp account for SLA auto-close message", "error", err)
+		return
+	}
+
+	waAccount := &whatsapp.Account{
+		PhoneID:     account.PhoneID,
+		BusinessID:  account.BusinessID,
+		APIVersion:  account.APIVersion,
+		AccessToken: account.AccessToken,
+	}
+
+	// Send message
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := p.app.WhatsApp.SendTextMessage(ctx, waAccount, transfer.PhoneNumber, message)
+	if err != nil {
+		p.app.Log.Error("Failed to send SLA auto-close message", "error", err, "phone", transfer.PhoneNumber)
+		return
+	}
+
+	p.app.Log.Info("SLA auto-close message sent to customer", "phone", transfer.PhoneNumber, "transfer_id", transfer.ID)
 }
 
 // broadcastTransferUpdate broadcasts transfer update via WebSocket

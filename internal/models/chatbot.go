@@ -29,7 +29,8 @@ type ChatbotSettings struct {
 	SLAResponseMinutes     int  `gorm:"default:15" json:"sla_response_minutes"`            // Time to pick up transfer (default 15 min)
 	SLAResolutionMinutes   int  `gorm:"default:60" json:"sla_resolution_minutes"`          // Time to resolve transfer (default 60 min)
 	SLAEscalationMinutes   int  `gorm:"default:30" json:"sla_escalation_minutes"`          // Time before escalation (default 30 min)
-	SLAAutoCloseHours      int  `gorm:"default:24" json:"sla_auto_close_hours"`            // Auto-close stale transfers (default 24h)
+	SLAAutoCloseHours      int    `gorm:"default:24" json:"sla_auto_close_hours"`           // Auto-close stale transfers (default 24h)
+	SLAAutoCloseMessage    string `gorm:"type:text" json:"sla_auto_close_message"`         // Message to customer when chat is auto-closed
 	SLAWarningMessage      string `gorm:"type:text" json:"sla_warning_message"`            // Message to customer when SLA breached
 	SLAEscalationNotifyIDs StringArray `gorm:"type:jsonb;default:'[]'" json:"sla_escalation_notify_ids"` // User IDs to notify on escalation
 

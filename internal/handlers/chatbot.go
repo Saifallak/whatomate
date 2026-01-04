@@ -36,6 +36,7 @@ type ChatbotSettingsResponse struct {
 	SLAResolutionMinutes   int      `json:"sla_resolution_minutes"`
 	SLAEscalationMinutes   int      `json:"sla_escalation_minutes"`
 	SLAAutoCloseHours      int      `json:"sla_auto_close_hours"`
+	SLAAutoCloseMessage    string   `json:"sla_auto_close_message"`
 	SLAWarningMessage      string   `json:"sla_warning_message"`
 	SLAEscalationNotifyIDs []string `json:"sla_escalation_notify_ids"`
 }
@@ -164,6 +165,7 @@ func (a *App) GetChatbotSettings(r *fastglue.Request) error {
 		SLAResolutionMinutes:   settings.SLAResolutionMinutes,
 		SLAEscalationMinutes:   settings.SLAEscalationMinutes,
 		SLAAutoCloseHours:      settings.SLAAutoCloseHours,
+		SLAAutoCloseMessage:    settings.SLAAutoCloseMessage,
 		SLAWarningMessage:      settings.SLAWarningMessage,
 		SLAEscalationNotifyIDs: settings.SLAEscalationNotifyIDs,
 	}
@@ -206,6 +208,7 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 		SLAResolutionMinutes   *int      `json:"sla_resolution_minutes"`
 		SLAEscalationMinutes   *int      `json:"sla_escalation_minutes"`
 		SLAAutoCloseHours      *int      `json:"sla_auto_close_hours"`
+		SLAAutoCloseMessage    *string   `json:"sla_auto_close_message"`
 		SLAWarningMessage      *string   `json:"sla_warning_message"`
 		SLAEscalationNotifyIDs *[]string `json:"sla_escalation_notify_ids"`
 	}
@@ -308,6 +311,9 @@ func (a *App) UpdateChatbotSettings(r *fastglue.Request) error {
 	}
 	if req.SLAAutoCloseHours != nil {
 		settings.SLAAutoCloseHours = *req.SLAAutoCloseHours
+	}
+	if req.SLAAutoCloseMessage != nil {
+		settings.SLAAutoCloseMessage = *req.SLAAutoCloseMessage
 	}
 	if req.SLAWarningMessage != nil {
 		settings.SLAWarningMessage = *req.SLAWarningMessage

@@ -111,6 +111,7 @@ const slaSettings = ref({
   sla_resolution_minutes: 60,
   sla_escalation_minutes: 30,
   sla_auto_close_hours: 24,
+  sla_auto_close_message: '',
   sla_warning_message: '',
   sla_escalation_notify_ids: [] as string[]
 })
@@ -201,6 +202,7 @@ onMounted(async () => {
         sla_resolution_minutes: data.settings.sla_resolution_minutes || 60,
         sla_escalation_minutes: data.settings.sla_escalation_minutes || 30,
         sla_auto_close_hours: data.settings.sla_auto_close_hours || 24,
+        sla_auto_close_message: data.settings.sla_auto_close_message || '',
         sla_warning_message: data.settings.sla_warning_message || '',
         sla_escalation_notify_ids: data.settings.sla_escalation_notify_ids || []
       }
@@ -292,6 +294,7 @@ async function saveSLASettings() {
       sla_resolution_minutes: slaSettings.value.sla_resolution_minutes,
       sla_escalation_minutes: slaSettings.value.sla_escalation_minutes,
       sla_auto_close_hours: slaSettings.value.sla_auto_close_hours,
+      sla_auto_close_message: slaSettings.value.sla_auto_close_message,
       sla_warning_message: slaSettings.value.sla_warning_message,
       sla_escalation_notify_ids: slaSettings.value.sla_escalation_notify_ids
     })
@@ -685,6 +688,17 @@ function isUserSelected(userId: string): boolean {
                       />
                       <p class="text-xs text-muted-foreground">Auto-close transfer if no response (0 to disable)</p>
                     </div>
+                  </div>
+
+                  <div class="space-y-2">
+                    <Label for="sla_auto_close_message">Auto-Close Message</Label>
+                    <Textarea
+                      id="sla_auto_close_message"
+                      v-model="slaSettings.sla_auto_close_message"
+                      placeholder="Your chat session has been closed due to inactivity. Please reach out again if you need further assistance."
+                      :rows="2"
+                    />
+                    <p class="text-xs text-muted-foreground">Message sent to customer when chat is auto-closed (leave empty to disable)</p>
                   </div>
 
                   <Separator />
