@@ -1211,9 +1211,9 @@ async function sendMediaMessage() {
                   </div>
                 </div>
                 <!-- Text content (for text messages or captions) -->
-                <span v-if="getMessageContent(message)" class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <span v-if="getMessageContent(message)" class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-5 w-5 status-icon', getMessageStatusClass(message.status)]" /></span></span>
                 <!-- Fallback for media without URL -->
-                <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-5 w-5 status-icon', getMessageStatusClass(message.status)]" /></span></span>
                 <!-- Interactive buttons -->
                 <div
                   v-if="getInteractiveButtons(message).length > 0"
@@ -1233,7 +1233,7 @@ async function sendMediaMessage() {
                   <component
                     v-if="message.direction === 'outgoing'"
                     :is="getMessageStatusIcon(message.status)"
-                    :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]"
+                    :class="['h-5 w-5 status-icon', getMessageStatusClass(message.status)]"
                   />
                 </span>
                 <!-- Reactions display -->
