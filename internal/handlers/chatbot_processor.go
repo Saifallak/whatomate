@@ -1315,6 +1315,50 @@ func (a *App) sendStepWithSkipCheck(account *models.WhatsAppAccount, session *mo
 
 	// Not skipping - send the step message normally
 	a.sendStepMessage(account, session, contact, step)
+
+	// If input type is "none", automatically advance to next step without waiting for user input
+	if step.InputType == "none" {
+
+		// Find next step
+		nextStepName := step.NextStep
+		if nextStepName == "" {
+			// Find by step order
+			for i, s := range flow.Steps {
+				if s.StepName == step.StepName && i+1 < len(flow.Steps) {
+					nextStepName = flow.Steps[i+1].StepName
+					break
+				}
+			}
+		}
+
+		if nextStepName == "" {
+			// No next step, complete flow
+			a.completeFlow(account, session, contact, flow)
+			return
+		}
+
+		// Find and execute next step
+		var nextStep *models.ChatbotFlowStep
+		for i := range flow.Steps {
+			if flow.Steps[i].StepName == nextStepName {
+				nextStep = &flow.Steps[i]
+				break
+			}
+		}
+
+		if nextStep == nil {
+			a.Log.Warn("Next step not found after no-input step, completing flow", "next_step", nextStepName)
+			a.completeFlow(account, session, contact, flow)
+			return
+		}
+
+		// Update session to next step
+		session.CurrentStep = nextStep.StepName
+		a.DB.Model(session).Update("current_step", nextStep.StepName)
+
+		// Recursively process next step (it may also need to skip or have no input)
+		a.sendStepWithSkipCheck(account, session, contact, nextStep, flow, skippedSteps)
+	}
 }
 
 // sendStepMessage sends the appropriate message based on step message_type
