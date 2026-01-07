@@ -240,6 +240,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		if len(path) >= 13 && path[:13] == "/api/auth/sso" {
 			return r
 		}
+		// Skip auth for custom action redirects (uses one-time token)
+		if len(path) >= 28 && path[:28] == "/api/custom-actions/redirect" {
+			return r
+		}
 		// Apply auth for all other /api routes (supports both JWT and API key)
 		if len(path) > 4 && path[:4] == "/api" {
 			return middleware.AuthWithDB(app.Config.JWT.Secret, app.DB)(r)
