@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o whatomate ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o whatomate ./cmd/whatomate
 
 # Final stage
 FROM alpine:3.19
@@ -37,4 +37,4 @@ RUN mkdir -p /app/uploads
 EXPOSE 8080
 
 # Run the binary
-CMD ["./whatomate", "-config", "config.toml", "-migrate"]
+CMD ["./whatomate", "server", "-config", "config.toml", "-migrate"]

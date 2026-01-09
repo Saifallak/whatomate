@@ -41,9 +41,18 @@ db = 0
 # JWT settings
 [jwt]
 secret = "your-jwt-secret-key"
-access_expiry = 3600      # 1 hour
-refresh_expiry = 604800   # 7 days
+access_expiry_mins = 15
+refresh_expiry_days = 7
+
+# Storage settings
+[storage]
+type = "local"       # local or s3
+local_path = "./uploads"
 ```
+
+<Aside type="note">
+  WhatsApp credentials and AI API keys are configured via the UI (Settings → Accounts) and stored in the database.
+</Aside>
 
 ## Environment Variables
 
@@ -76,7 +85,7 @@ psql -c "CREATE DATABASE whatomate;"
 ### Run Migrations
 
 ```bash
-go run cmd/server/main.go -migrate
+./whatomate server -migrate
 ```
 
 ## WhatsApp API Configuration
@@ -95,6 +104,101 @@ Configure your WhatsApp Business API credentials in the application settings aft
   Keep your access token secure. Never commit it to version control or expose it in client-side code.
 </Aside>
 
+## Building
+
+### Development Build
+
+```bash
+make build    # Backend only (no frontend embedded)
+```
+
+For development, run backend and frontend separately:
+- Backend: `make run` or `./whatomate server`
+- Frontend: `cd frontend && npm run dev`
+
+### Production Build
+
+```bash
+make build-prod    # Single binary with embedded frontend
+```
+
+This creates a self-contained binary that serves both API and frontend.
+
+| Command | Frontend | Use Case |
+|---------|----------|----------|
+| `make build` | Not embedded | Development |
+| `make build-prod` | Embedded | Production |
+
+## CLI Reference
+
+Whatomate uses a single binary with subcommands:
+
+```bash
+./whatomate <command> [options]
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `server` | Start the API server (with optional embedded workers) |
+| `worker` | Start background workers only (no API server) |
+| `version` | Show version information |
+| `help` | Show help message |
+
+### Server Options
+
+```bash
+./whatomate server [options]
+
+  -config string    Path to config file (default "config.toml")
+  -migrate          Run database migrations on startup
+  -workers int      Number of embedded workers, 0 to disable (default 1)
+```
+
+### Worker Options
+
+```bash
+./whatomate worker [options]
+
+  -config string    Path to config file (default "config.toml")
+  -workers int      Number of workers to run (default 1)
+```
+
+## Deployment Scenarios
+
+### All-in-One (Simple)
+
+Run API and workers in a single process:
+
+```bash
+./whatomate server
+```
+
+### Separate API and Workers (Scalable)
+
+Run API server without embedded workers:
+
+```bash
+./whatomate server -workers=0
+```
+
+Run workers on separate machines:
+
+```bash
+./whatomate worker -workers=4
+```
+
+### Docker Compose
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Scale workers
+docker-compose up -d --scale worker=3
+```
+
 ## Production Recommendations
 
 For production deployments:
@@ -105,3 +209,4 @@ For production deployments:
 - Use Redis authentication in production
 - Configure proper firewall rules
 - Set up SSL/TLS termination (nginx, Caddy, or cloud load balancer)
+- Consider running API and workers separately for better scaling

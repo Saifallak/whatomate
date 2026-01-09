@@ -13,8 +13,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the worker binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o whatomate-worker ./cmd/worker
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o whatomate ./cmd/whatomate
 
 # Final stage
 FROM alpine:3.19
@@ -25,10 +25,10 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata
 
 # Copy binary from builder
-COPY --from=builder /app/whatomate-worker .
+COPY --from=builder /app/whatomate .
 
 # Copy config example (will be overridden by env vars in production)
 COPY --from=builder /app/config.example.toml ./config.toml
 
 # Run the worker binary
-CMD ["./whatomate-worker", "-config", "config.toml"]
+CMD ["./whatomate", "worker", "-config", "config.toml"]

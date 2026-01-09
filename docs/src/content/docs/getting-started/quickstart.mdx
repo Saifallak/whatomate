@@ -3,103 +3,150 @@ title: Quickstart
 description: Get Whatomate up and running in minutes
 ---
 
-import { Steps, Aside } from '@astrojs/starlight/components';
+import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
 Get Whatomate up and running in minutes using Docker or manual installation.
 
-## Prerequisites
+## Quick Start (Docker)
 
-- Docker and Docker Compose (for Docker installation)
-- Go 1.21+ (for manual installation)
-- Node.js 18+ (for frontend development)
-- PostgreSQL 14+
-- Redis 6+
+The fastest way to get started:
 
-## Docker Installation (Recommended)
+```bash
+# Clone the repository
+git clone https://github.com/shridarpatil/whatomate.git
+cd whatomate
 
-<Steps>
+# Start all services (PostgreSQL, Redis, Server)
+make docker-up
 
-1. **Clone the repository**
+# Access the application
+open http://localhost:8080
+```
 
-   ```bash
-   git clone https://github.com/shridarpatil/whatomate.git
-   cd whatomate
-   ```
+**Default login:** `admin@admin.com` / `admin`
 
-2. **Configure environment**
-
-   ```bash
-   cp config.example.toml config.toml
-   # Edit config.toml with your settings
-   ```
-
-3. **Start with Docker Compose**
-
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Access the application**
-
-   Open [http://localhost:8080](http://localhost:8080) in your browser.
-
-</Steps>
+<Aside type="caution">
+  Change the admin password immediately after first login.
+</Aside>
 
 ## Manual Installation
 
-<Steps>
+### Prerequisites
 
-1. **Clone and setup backend**
+- Go 1.21+
+- Node.js 18+
+- PostgreSQL 14+
+- Redis 6+
 
-   ```bash
-   git clone https://github.com/shridarpatil/whatomate.git
-   cd whatomate
-   go mod download
-   ```
+### Step 1: Clone and Configure
 
-2. **Configure the application**
+```bash
+git clone https://github.com/shridarpatil/whatomate.git
+cd whatomate
+cp config.example.toml config.toml
+```
 
-   ```bash
-   cp config.example.toml config.toml
-   # Edit config.toml with your database and Redis settings
-   ```
+### Step 2: Setup PostgreSQL
 
-3. **Run database migrations**
+```bash
+# Create database
+createdb whatomate
 
-   ```bash
-   go run cmd/server/main.go -migrate
-   ```
+# Or using psql
+psql -c "CREATE DATABASE whatomate;"
 
-   This will also create a default admin user (see below).
+# Or with custom user
+psql -c "CREATE USER whatomate WITH PASSWORD 'whatomate123';"
+psql -c "CREATE DATABASE whatomate OWNER whatomate;"
+```
 
-4. **Start the backend server**
+Update `config.toml` with your database credentials:
 
-   ```bash
-   go run cmd/server/main.go
-   ```
+```toml
+[database]
+host = "localhost"
+port = 5432
+user = "whatomate"
+password = "whatomate123"
+name = "whatomate"
+```
 
-5. **Setup frontend (development)**
+### Step 3: Setup Redis
 
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+<Tabs>
+  <TabItem label="macOS">
+    ```bash
+    brew install redis
+    brew services start redis
+    ```
+  </TabItem>
+  <TabItem label="Ubuntu/Debian">
+    ```bash
+    sudo apt install redis-server
+    sudo systemctl start redis
+    ```
+  </TabItem>
+  <TabItem label="Docker">
+    ```bash
+    docker run -d -p 6379:6379 redis:alpine
+    ```
+  </TabItem>
+</Tabs>
 
-</Steps>
+### Step 4: Start Backend
 
-## Default Admin Login
+```bash
+# Install Go dependencies
+go mod download
 
-When you run migrations for the first time, a default admin user is automatically created:
+# Run migrations and start server
+make run-migrate
+```
 
-| Field | Value |
-|-------|-------|
-| Email | `admin@admin.com` |
-| Password | `admin` |
+### Step 5: Start Frontend
+
+Open a new terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Step 6: Access Application
+
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:3000 |
+| API | http://localhost:8080 |
+
+**Login:** `admin@admin.com` / `admin`
 
 <Aside type="caution">
-  Change this password immediately after first login via the Profile page (accessible from the user menu).
+  Change the admin password immediately after first login via the Profile page.
 </Aside>
+
+## Production Build
+
+For production, build a single binary with embedded frontend:
+
+```bash
+make build-prod
+./whatomate server -migrate
+```
+
+This creates a self-contained binary—no separate frontend server needed. Access at http://localhost:8080.
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `connection refused` (database) | Ensure PostgreSQL is running: `pg_isready` |
+| `connection refused` (redis) | Ensure Redis is running: `redis-cli ping` |
+| `database does not exist` | Create it: `createdb whatomate` |
+| `permission denied` | Check database user/password in `config.toml` |
+| `port already in use` | Change port in `config.toml` or stop conflicting service |
+| Frontend can't reach API | Ensure backend is running on port 8080 |
 
 ## WhatsApp Configuration
 
@@ -110,12 +157,12 @@ To connect your WhatsApp Business account:
 1. Create a Meta Business account at [business.facebook.com](https://business.facebook.com)
 2. Set up a WhatsApp Business API account
 3. Generate an access token and note your Phone Number ID
-4. Add these credentials in Whatomate's Account Settings
+4. Add these credentials in Whatomate's **Settings** → **Accounts**
 
 </Steps>
 
 <Aside type="tip">
-  For development, you can use Meta's test phone numbers to send messages without affecting your production account.
+  For development, use Meta's test phone numbers to send messages without affecting your production account.
 </Aside>
 
 ## Next Steps

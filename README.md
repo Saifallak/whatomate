@@ -86,8 +86,7 @@ A modern WhatsApp Business Platform built with Go (Fastglue) and Vue.js (shadcn-
 ```
 whatomate/
 ├── cmd/
-│   ├── server/           # Main application entry point
-│   └── worker/           # Standalone worker entry point
+│   └── whatomate/        # Single binary with server/worker subcommands
 ├── internal/
 │   ├── config/           # Configuration management
 │   ├── database/         # Database connections
@@ -113,92 +112,204 @@ whatomate/
 
 ## Getting Started
 
-### Prerequisites
+### Quick Start (Docker)
+
+The fastest way to get started:
+
+```bash
+# Clone the repository
+git clone https://github.com/shridarpatil/whatomate.git
+cd whatomate
+
+# Start all services (PostgreSQL, Redis, Server)
+make docker-up
+
+# Access the application
+open http://localhost:8080
+```
+
+**Default login:** `admin@admin.com` / `admin`
+
+### Manual Installation
+
+#### Prerequisites
 
 - Go 1.21+
 - Node.js 18+
 - PostgreSQL 14+
 - Redis 6+
-- Docker & Docker Compose (optional)
 
-### Development Setup
-
-1. **Clone and configure**:
-   ```bash
-   cd whatomate
-   cp config.example.toml config.toml
-   # Edit config.toml with your settings
-   ```
-
-2. **Start backend**:
-   ```bash
-   # Install dependencies
-   go mod download
-
-   # Run database migrations
-   make migrate
-
-   # Start the server (includes 1 embedded worker by default)
-   make run
-
-   # Or run with more workers for higher throughput
-   go run cmd/server/main.go -workers=3
-
-   # Or disable embedded workers (run workers separately)
-   go run cmd/server/main.go -workers=0
-   ```
-
-3. **Start frontend**:
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-
-### Docker Setup
+#### Step 1: Clone and Configure
 
 ```bash
-# Build Docker images
-make docker-build
-
-# Start all services (PostgreSQL, Redis, Server, Worker)
-make docker-up
+git clone https://github.com/shridarpatil/whatomate.git
+cd whatomate
+cp config.example.toml config.toml
 ```
 
-Access the application at `http://localhost:3000` or `http://localhost` (port 80 via nginx)
-
-#### Other Docker Commands
+#### Step 2: Setup PostgreSQL
 
 ```bash
-# Stop all services
-make docker-down
+# Create database
+createdb whatomate
 
-# View logs
-make docker-logs
+# Or using psql
+psql -c "CREATE DATABASE whatomate;"
 
-# Rebuild and restart
-make docker-build && make docker-up
+# Or with custom user
+psql -c "CREATE USER whatomate WITH PASSWORD 'whatomate123';"
+psql -c "CREATE DATABASE whatomate OWNER whatomate;"
 ```
 
-#### Scaling Workers
+Update `config.toml` with your database credentials:
 
-For high-volume campaign processing, you can scale the worker service:
+```toml
+[database]
+host = "localhost"
+port = 5432
+user = "whatomate"
+password = "whatomate123"
+name = "whatomate"
+```
+
+#### Step 3: Setup Redis
 
 ```bash
-cd docker
-docker compose up -d --scale worker=3
+# macOS
+brew install redis && brew services start redis
+
+# Ubuntu/Debian
+sudo apt install redis-server && sudo systemctl start redis
+
+# Docker (alternative)
+docker run -d -p 6379:6379 redis:alpine
 ```
 
-Workers use Redis Streams consumer groups, ensuring each job is processed by exactly one worker.
+#### Step 4: Start Backend
 
-### Default Admin Login
+```bash
+# Install Go dependencies
+go mod download
 
-When you run migrations for the first time, a default admin user is created:
+# Run migrations and start server
+make run-migrate
+```
 
-- **Email**: `admin@admin.com`
-- **Password**: `admin`
+#### Step 5: Start Frontend (separate terminal)
 
-> **Important**: Change this password immediately after first login via the Profile page.
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+#### Step 6: Access Application
+
+- **Frontend:** http://localhost:3000
+- **API:** http://localhost:8080
+- **Login:** `admin@admin.com` / `admin`
+
+> **Important:** Change the admin password after first login.
+
+### Docker Commands
+
+```bash
+make docker-up       # Start all services
+make docker-down     # Stop all services
+make docker-logs     # View logs
+make docker-build    # Rebuild images
+
+# Scale workers for high-volume campaigns
+cd docker && docker compose up -d --scale worker=3
+```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `connection refused` (database) | Ensure PostgreSQL is running: `pg_isready` |
+| `connection refused` (redis) | Ensure Redis is running: `redis-cli ping` |
+| `database does not exist` | Create it: `createdb whatomate` |
+| `permission denied` | Check database user/password in `config.toml` |
+| `port already in use` | Change port in `config.toml` or stop conflicting service |
+| Frontend can't reach API | Ensure backend is running on port 8080 |
+
+## Building
+
+### Development Build
+
+```bash
+make build    # Backend only (no frontend embedded)
+```
+
+For development, run backend and frontend separately:
+- Backend: `make run` or `./whatomate server`
+- Frontend: `cd frontend && npm run dev`
+
+### Production Build
+
+```bash
+make build-prod    # Single binary with embedded frontend
+```
+
+This creates a self-contained binary that serves both API and frontend. No separate frontend server needed.
+
+| Command | Frontend | Use Case |
+|---------|----------|----------|
+| `make build` | Not embedded | Development (run frontend separately) |
+| `make build-prod` | Embedded | Production (single binary deployment) |
+
+## CLI Usage
+
+Whatomate uses a single binary with subcommands:
+
+```bash
+./whatomate <command> [options]
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `server` | Start the API server (with optional embedded workers) |
+| `worker` | Start background workers only (no API server) |
+| `version` | Show version information |
+| `help` | Show help message |
+
+### Server Options
+
+```bash
+./whatomate server [options]
+
+Options:
+  -config string    Path to config file (default "config.toml")
+  -migrate          Run database migrations on startup
+  -workers int      Number of embedded workers, 0 to disable (default 1)
+```
+
+### Worker Options
+
+```bash
+./whatomate worker [options]
+
+Options:
+  -config string    Path to config file (default "config.toml")
+  -workers int      Number of workers to run (default 1)
+```
+
+### Deployment Examples
+
+```bash
+# All-in-one (API + workers)
+./whatomate server
+
+# API only (no workers)
+./whatomate server -workers=0
+
+# Separate API and workers (distributed deployment)
+./whatomate server -workers=0    # On API server
+./whatomate worker -workers=4    # On worker server(s)
+```
 
 ## Configuration
 
@@ -230,18 +341,15 @@ db = 0
 
 [jwt]
 secret = "your-jwt-secret"
-access_token_expiry = "15m"
-refresh_token_expiry = "7d"
+access_expiry_mins = 15
+refresh_expiry_days = 7
 
-[whatsapp]
-api_version = "v18.0"
-webhook_verify_token = "your-webhook-verify-token"
-
-[ai]
-openai_api_key = ""
-anthropic_api_key = ""
-google_api_key = ""
+[storage]
+type = "local"       # local or s3
+local_path = "./uploads"
 ```
+
+> **Note:** WhatsApp credentials and AI API keys are configured via the UI and stored in the database.
 
 ## Worker Service
 
@@ -271,23 +379,23 @@ The worker service handles bulk campaign message processing using Redis Streams 
 
 ```bash
 # Default: 1 worker
-./whatomate
+./whatomate server
 
 # Run with 3 embedded workers
-./whatomate -workers=3
+./whatomate server -workers=3
 
 # Disable embedded workers (use standalone workers only)
-./whatomate -workers=0
+./whatomate server -workers=0
 ```
 
 **Standalone Mode**: Run workers as separate processes.
 
 ```bash
 # Run standalone worker (1 worker)
-go run cmd/worker/main.go
+./whatomate worker
 
 # Run with multiple workers
-go run cmd/worker/main.go -workers=5
+./whatomate worker -workers=5
 
 # Or with Docker Compose
 docker compose up -d --scale worker=3
@@ -299,13 +407,13 @@ Workers can be added dynamically without restarting the server. Since all worker
 
 ```bash
 # Server running with 1 embedded worker
-go run cmd/server/main.go -workers=1
+./whatomate server -workers=1
 
 # In another terminal, add 5 more workers
-go run cmd/worker/main.go -workers=5
+./whatomate worker -workers=5
 
 # Add even more workers if needed
-go run cmd/worker/main.go -workers=10
+./whatomate worker -workers=10
 ```
 
 This is useful for:

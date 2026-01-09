@@ -24,13 +24,77 @@ import (
 )
 
 var (
-	configPath  = flag.String("config", "config.toml", "Path to config file")
-	migrate     = flag.Bool("migrate", false, "Run database migrations")
-	numWorkers  = flag.Int("workers", 1, "Number of workers to run (0 to disable embedded workers)")
+	Version   = "dev"
+	BuildTime = "unknown"
 )
 
 func main() {
-	flag.Parse()
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
+	}
+
+	switch os.Args[1] {
+	case "server":
+		runServer(os.Args[2:])
+	case "worker":
+		runWorker(os.Args[2:])
+	case "version":
+		fmt.Printf("Whatomate %s (built %s)\n", Version, BuildTime)
+	case "help", "-h", "--help":
+		printUsage()
+	default:
+		fmt.Printf("Unknown command: %s\n\n", os.Args[1])
+		printUsage()
+		os.Exit(1)
+	}
+}
+
+func printUsage() {
+	fmt.Println(`Whatomate - WhatsApp Business API Platform
+
+Usage:
+  whatomate <command> [options]
+
+Commands:
+  server    Start the API server (with optional embedded workers)
+  worker    Start background workers only (no API server)
+  version   Show version information
+  help      Show this help message
+
+Server Options:
+  -config string    Path to config file (default "config.toml")
+  -migrate          Run database migrations on startup
+  -workers int      Number of embedded workers (0 to disable) (default 1)
+
+Worker Options:
+  -config string    Path to config file (default "config.toml")
+  -workers int      Number of workers to run (default 1)
+
+Examples:
+  whatomate server                     # API + 1 embedded worker
+  whatomate server -workers 0          # API only (no workers)
+  whatomate server -workers 4          # API + 4 embedded workers
+  whatomate server -migrate            # Run migrations and start server
+  whatomate worker -workers 4          # 4 workers only (no API)
+
+Deployment Scenarios:
+  All-in-one:    whatomate server
+  Separate:      whatomate server -workers 0  (on API server)
+                 whatomate worker -workers 4  (on worker server)
+`)
+}
+
+// ============================================================================
+// SERVER COMMAND
+// ============================================================================
+
+func runServer(args []string) {
+	serverFlags := flag.NewFlagSet("server", flag.ExitOnError)
+	configPath := serverFlags.String("config", "config.toml", "Path to config file")
+	migrate := serverFlags.Bool("migrate", false, "Run database migrations")
+	numWorkers := serverFlags.Int("workers", 1, "Number of workers to run (0 to disable embedded workers)")
+	serverFlags.Parse(args)
 
 	// Initialize logger
 	lo := logf.New(logf.Opts{
@@ -41,7 +105,7 @@ func main() {
 		DefaultFields:   []any{"app", "whatomate"},
 	})
 
-	lo.Info("Starting Whatomate server...")
+	lo.Info("Starting Whatomate server...", "version", Version)
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
@@ -202,6 +266,111 @@ func main() {
 	}
 	lo.Info("Server stopped")
 }
+
+// ============================================================================
+// WORKER COMMAND
+// ============================================================================
+
+func runWorker(args []string) {
+	workerFlags := flag.NewFlagSet("worker", flag.ExitOnError)
+	configPath := workerFlags.String("config", "config.toml", "Path to config file")
+	workerCount := workerFlags.Int("workers", 1, "Number of workers to run")
+	workerFlags.Parse(args)
+
+	// Initialize logger
+	lo := logf.New(logf.Opts{
+		EnableColor:     true,
+		Level:           logf.DebugLevel,
+		EnableCaller:    true,
+		TimestampFormat: "2006-01-02 15:04:05",
+		DefaultFields:   []any{"app", "whatomate-worker"},
+	})
+
+	lo.Info("Starting Whatomate worker...", "version", Version)
+
+	// Load configuration
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		lo.Fatal("Failed to load config", "error", err)
+	}
+
+	// Set log level based on environment
+	if cfg.App.Environment == "production" {
+		lo = logf.New(logf.Opts{
+			Level:           logf.InfoLevel,
+			TimestampFormat: "2006-01-02 15:04:05",
+			DefaultFields:   []any{"app", "whatomate-worker"},
+		})
+	}
+
+	// Connect to PostgreSQL
+	db, err := database.NewPostgres(&cfg.Database, cfg.App.Debug)
+	if err != nil {
+		lo.Fatal("Failed to connect to database", "error", err)
+	}
+	lo.Info("Connected to PostgreSQL")
+
+	// Connect to Redis
+	rdb, err := database.NewRedis(&cfg.Redis)
+	if err != nil {
+		lo.Fatal("Failed to connect to Redis", "error", err)
+	}
+	lo.Info("Connected to Redis")
+
+	// Setup context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle shutdown signals
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Create and run workers
+	workers := make([]*worker.Worker, *workerCount)
+	errCh := make(chan error, *workerCount)
+
+	for i := 0; i < *workerCount; i++ {
+		w, err := worker.New(cfg, db, rdb, lo)
+		if err != nil {
+			lo.Fatal("Failed to create worker", "error", err, "worker_num", i+1)
+		}
+		workers[i] = w
+
+		go func(workerNum int) {
+			lo.Info("Worker started", "worker_num", workerNum)
+			errCh <- w.Run(ctx)
+		}(i + 1)
+	}
+
+	lo.Info("Workers started", "count", *workerCount)
+
+	// Wait for shutdown signal or error
+	select {
+	case sig := <-quit:
+		lo.Info("Received shutdown signal", "signal", sig)
+		cancel()
+	case err := <-errCh:
+		if err != nil && err != context.Canceled {
+			lo.Error("Worker error", "error", err)
+			cancel()
+		}
+	}
+
+	// Cleanup
+	lo.Info("Shutting down workers...")
+	for _, w := range workers {
+		if w != nil {
+			if err := w.Close(); err != nil {
+				lo.Error("Error closing worker", "error", err)
+			}
+		}
+	}
+	lo.Info("Workers stopped")
+}
+
+// ============================================================================
+// ROUTES
+// ============================================================================
 
 func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePath string) {
 	// Health check
