@@ -57,9 +57,11 @@ type AIConfig struct {
 
 // PanelFieldConfig defines a field to display in the contact info panel
 type PanelFieldConfig struct {
-	Key   string `json:"key"`   // Variable name (from StoreAs or response_mapping)
-	Label string `json:"label"` // Admin-defined display label
-	Order int    `json:"order"` // Field order within section
+	Key         string `json:"key"`                    // Variable name (from StoreAs or response_mapping)
+	Label       string `json:"label"`                  // Admin-defined display label
+	Order       int    `json:"order"`                  // Field order within section
+	DisplayType string `json:"display_type,omitempty"` // text (default), badge, tag
+	Color       string `json:"color,omitempty"`        // default, success, warning, error, info
 }
 
 // PanelSection defines a section in the contact info panel

@@ -709,7 +709,9 @@ function addFieldToSection(sectionIndex: number, variableKey: string) {
   section.fields.push({
     key: variableKey,
     label: variableKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-    order: section.fields.length + 1
+    order: section.fields.length + 1,
+    display_type: 'text',
+    color: 'default'
   })
 }
 
@@ -1260,16 +1262,42 @@ function confirmCancel() {
                         No fields added
                       </div>
 
-                      <div v-for="(field, fieldIdx) in section.fields" :key="field.key" class="flex items-center gap-1 bg-background rounded p-1">
-                        <Badge variant="secondary" class="text-[10px] font-mono">{{ field.key }}</Badge>
-                        <Input
-                          v-model="field.label"
-                          placeholder="Display Label"
-                          class="h-6 text-[10px] flex-1"
-                        />
-                        <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeFieldFromSection(sectionIdx, fieldIdx)">
-                          <Trash2 class="h-3 w-3 text-destructive" />
-                        </Button>
+                      <div v-for="(field, fieldIdx) in section.fields" :key="field.key" class="bg-background rounded p-2 space-y-2">
+                        <div class="flex items-center gap-1">
+                          <Badge variant="secondary" class="text-[10px] font-mono">{{ field.key }}</Badge>
+                          <Input
+                            v-model="field.label"
+                            placeholder="Display Label"
+                            class="h-6 text-[10px] flex-1"
+                          />
+                          <Button variant="ghost" size="icon" class="h-6 w-6" @click="removeFieldFromSection(sectionIdx, fieldIdx)">
+                            <Trash2 class="h-3 w-3 text-destructive" />
+                          </Button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <Select v-model="field.display_type">
+                            <SelectTrigger class="h-6 text-[10px] w-20">
+                              <SelectValue placeholder="Type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="text">Text</SelectItem>
+                              <SelectItem value="badge">Badge</SelectItem>
+                              <SelectItem value="tag">Tag</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Select v-model="field.color" :disabled="field.display_type === 'text'">
+                            <SelectTrigger class="h-6 text-[10px] flex-1">
+                              <SelectValue placeholder="Color" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="default">Default</SelectItem>
+                              <SelectItem value="success">Success (Green)</SelectItem>
+                              <SelectItem value="warning">Warning (Yellow)</SelectItem>
+                              <SelectItem value="error">Error (Red)</SelectItem>
+                              <SelectItem value="info">Info (Blue)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -19,6 +19,8 @@ interface PanelFieldConfig {
   key: string
   label: string
   order: number
+  display_type?: 'text' | 'badge' | 'tag'
+  color?: 'default' | 'success' | 'warning' | 'error' | 'info'
 }
 
 interface PanelSection {
@@ -127,6 +129,21 @@ function getFieldValue(key: string): string {
   return String(value)
 }
 
+function getColorClass(color?: string): string {
+  switch (color) {
+    case 'success':
+      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+    case 'warning':
+      return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+    case 'error':
+      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+    case 'info':
+      return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+    default:
+      return 'bg-muted text-muted-foreground'
+  }
+}
+
 // Sort sections by order
 const sortedSections = computed(() => {
   if (!sessionData.value?.panel_config?.sections) return []
@@ -232,7 +249,22 @@ const contactTags = computed(() => {
                     class="bg-muted/50 rounded-md px-3 py-2"
                   >
                     <p class="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">{{ field.label }}</p>
-                    <p class="text-sm font-semibold break-words mt-0.5">{{ getFieldValue(field.key) }}</p>
+                    <!-- Badge display -->
+                    <span
+                      v-if="field.display_type === 'badge'"
+                      :class="['inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold mt-1', getColorClass(field.color)]"
+                    >
+                      {{ getFieldValue(field.key) }}
+                    </span>
+                    <!-- Tag display -->
+                    <span
+                      v-else-if="field.display_type === 'tag'"
+                      :class="['inline-flex items-center rounded-md px-2 py-1 text-xs font-medium mt-1', getColorClass(field.color)]"
+                    >
+                      {{ getFieldValue(field.key) }}
+                    </span>
+                    <!-- Default text display -->
+                    <p v-else class="text-sm font-semibold break-words mt-0.5">{{ getFieldValue(field.key) }}</p>
                   </div>
                 </div>
               </CollapsibleContent>
@@ -253,7 +285,22 @@ const contactTags = computed(() => {
                   class="bg-muted/50 rounded-md px-3 py-2"
                 >
                   <p class="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">{{ field.label }}</p>
-                  <p class="text-sm font-semibold break-words mt-0.5">{{ getFieldValue(field.key) }}</p>
+                  <!-- Badge display -->
+                  <span
+                    v-if="field.display_type === 'badge'"
+                    :class="['inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold mt-1', getColorClass(field.color)]"
+                  >
+                    {{ getFieldValue(field.key) }}
+                  </span>
+                  <!-- Tag display -->
+                  <span
+                    v-else-if="field.display_type === 'tag'"
+                    :class="['inline-flex items-center rounded-md px-2 py-1 text-xs font-medium mt-1', getColorClass(field.color)]"
+                  >
+                    {{ getFieldValue(field.key) }}
+                  </span>
+                  <!-- Default text display -->
+                  <p v-else class="text-sm font-semibold break-words mt-0.5">{{ getFieldValue(field.key) }}</p>
                 </div>
               </div>
             </div>
