@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 @layer base {
+
   /* Dark-first: Linear/Vercel inspired dark mode */
   :root {
     /* True black background like Linear/Vercel */
@@ -15,9 +16,13 @@
     --popover: 0 0% 7%;
     --popover-foreground: 0 0% 98%;
 
-    /* Emerald green primary (WhatsApp style) */
+    /* Emerald green primary (WhatsApp style) - Can be overridden by JS */
     --primary: 160 84% 39%;
     --primary-foreground: 0 0% 100%;
+
+    /* Gradient colors - Auto-generated or custom */
+    --primary-gradient-start: 160 84% 47%;
+    --primary-gradient-end: 160 84% 31%;
 
     /* Subtle secondary/muted for glass effect */
     --secondary: 0 0% 8%;
@@ -40,6 +45,9 @@
     --glass-bg: rgba(255, 255, 255, 0.03);
     --glass-bg-hover: rgba(255, 255, 255, 0.06);
     --glass-border: rgba(255, 255, 255, 0.06);
+
+    /* Gradient color for background - Can be overridden by JS */
+    --gradient-color: rgba(16, 185, 129, 0.08);
   }
 
   /* Light mode - clean white like Vercel */
@@ -103,40 +111,56 @@
   * {
     @apply border-border;
   }
+
   html {
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
   body {
     @apply bg-background text-foreground font-sans;
     line-height: 1.5;
     font-weight: 400;
-    /* Subtle gradient for depth like Linear/Vercel */
-    background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.08), transparent);
+    /* Subtle gradient for depth like Linear/Vercel - uses dynamic color */
+    background-image: radial-gradient(ellipse 80% 50% at 50% -20%, var(--gradient-color), transparent);
   }
+
   .light body {
-    background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.05), transparent);
+    background-image: radial-gradient(ellipse 80% 50% at 50% -20%, var(--gradient-color), transparent);
   }
-  h1, h2, h3, h4, h5, h6 {
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     @apply font-medium;
     margin-top: 0;
   }
+
   h1 {
     @apply text-2xl;
     line-height: 1.25;
   }
+
   h2 {
     @apply text-xl;
     line-height: 1.4;
   }
+
   h3 {
     @apply text-lg;
     line-height: 1.5;
   }
-  h4, h5, h6 {
+
+  h4,
+  h5,
+  h6 {
     @apply text-base;
   }
+
   a {
     @apply text-primary font-medium;
     text-decoration: none;
@@ -199,7 +223,7 @@
   left: 0;
   width: 100%;
   height: 2px;
-  background: linear-gradient(90deg, #22c55e, #10b981, #059669);
+  background: linear-gradient(90deg, hsl(var(--primary-gradient-start)), hsl(var(--primary)), hsl(var(--primary-gradient-end)));
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 0.3s ease;
@@ -461,12 +485,13 @@
   border-color: rgba(255, 255, 255, 0.15);
 }
 
-.interactive-buttons > div {
+.interactive-buttons>div {
   border-color: rgba(255, 255, 255, 0.15);
-  color: #4ade80; /* emerald-400 for dark mode incoming */
+  color: #4ade80;
+  /* emerald-400 for dark mode incoming */
 }
 
-.interactive-buttons > div:hover {
+.interactive-buttons>div:hover {
   background: rgba(255, 255, 255, 0.08);
 }
 
@@ -475,12 +500,12 @@
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-.chat-bubble-outgoing .interactive-buttons > div {
+.chat-bubble-outgoing .interactive-buttons>div {
   border-color: rgba(255, 255, 255, 0.2);
   color: rgba(255, 255, 255, 0.95);
 }
 
-.chat-bubble-outgoing .interactive-buttons > div:hover {
+.chat-bubble-outgoing .interactive-buttons>div:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 
@@ -488,23 +513,32 @@
   border-color: rgba(0, 0, 0, 0.1);
 }
 
-.light .interactive-buttons > div {
+.light .interactive-buttons>div {
   border-color: rgba(0, 0, 0, 0.1);
-  color: #16a34a; /* emerald-600 for light mode */
+  color: #16a34a;
+  /* emerald-600 for light mode */
 }
 
-.light .interactive-buttons > div:hover {
+.light .interactive-buttons>div:hover {
   background: rgba(0, 0, 0, 0.05);
 }
 
-.light .chat-bubble-outgoing .interactive-buttons > div {
-  color: #166534; /* darker green for light mode outgoing */
+.light .chat-bubble-outgoing .interactive-buttons>div {
+  color: #166534;
+  /* darker green for light mode outgoing */
 }
 
 /* Message highlight animation for scroll-to */
 @keyframes highlight-pulse {
-  0%, 100% { background-color: transparent; }
-  50% { background-color: hsl(var(--primary) / 0.15); }
+
+  0%,
+  100% {
+    background-color: transparent;
+  }
+
+  50% {
+    background-color: hsl(var(--primary) / 0.15);
+  }
 }
 
 .highlight-message {
