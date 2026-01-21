@@ -132,6 +132,10 @@ export function getColorConfig(): ColorConfig {
     const secondaryHex = import.meta.env.VITE_SECONDARY_COLOR
     const accentHex = import.meta.env.VITE_ACCENT_COLOR
 
+    console.log('🎨 [Color Config] Reading environment variables...')
+    console.log('  VITE_PRIMARY_COLOR:', import.meta.env.VITE_PRIMARY_COLOR)
+    console.log('  Resolved primaryHex:', primaryHex)
+
     // Check if custom gradient colors are provided
     const gradientStartHex = import.meta.env.VITE_PRIMARY_GRADIENT_START
     const gradientEndHex = import.meta.env.VITE_PRIMARY_GRADIENT_END
@@ -141,22 +145,29 @@ export function getColorConfig(): ColorConfig {
 
     if (gradientStartHex && gradientEndHex) {
         // Use custom gradient colors
+        console.log('  Using custom gradient colors')
         gradientStart = hslToString(hexToHSL(gradientStartHex))
         gradientEnd = hslToString(hexToHSL(gradientEndHex))
     } else {
         // Auto-generate gradient from primary color
+        console.log('  Auto-generating gradient...')
         const gradient = generateGradient(primaryHex)
         gradientStart = hslToString(gradient.start)
         gradientEnd = hslToString(gradient.end)
+        console.log('  Gradient start:', gradientStart)
+        console.log('  Gradient end:', gradientEnd)
     }
 
-    return {
+    const config = {
         primary: hslToString(hexToHSL(primaryHex)),
         primaryGradientStart: gradientStart,
         primaryGradientEnd: gradientEnd,
         secondary: secondaryHex ? hslToString(hexToHSL(secondaryHex)) : undefined,
         accent: accentHex ? hslToString(hexToHSL(accentHex)) : undefined
     }
+
+    console.log('  Final config:', config)
+    return config
 }
 
 /**
@@ -164,16 +175,22 @@ export function getColorConfig(): ColorConfig {
  * This function should be called on app initialization
  */
 export function applyColorTheme(): void {
+    console.log('🎨 [Apply Theme] Starting...')
     const colors = getColorConfig()
     const root = document.documentElement
 
     // Apply primary color
+    console.log('  Setting CSS variables...')
     root.style.setProperty('--primary', colors.primary)
     root.style.setProperty('--ring', colors.primary)
 
     // Apply gradient colors
     root.style.setProperty('--primary-gradient-start', colors.primaryGradientStart)
     root.style.setProperty('--primary-gradient-end', colors.primaryGradientEnd)
+
+    console.log('  --primary:', colors.primary)
+    console.log('  --primary-gradient-start:', colors.primaryGradientStart)
+    console.log('  --primary-gradient-end:', colors.primaryGradientEnd)
 
     // Apply secondary color if provided
     if (colors.secondary) {
@@ -189,6 +206,9 @@ export function applyColorTheme(): void {
     const primaryHSL = hexToHSL(import.meta.env.VITE_PRIMARY_COLOR || '#10b981')
     const gradientColor = `rgba(${hslToRGB(primaryHSL).join(', ')}, 0.08)`
     root.style.setProperty('--gradient-color', gradientColor)
+
+    console.log('✅ [Apply Theme] Complete!')
+    console.log('💡 Check in DevTools: getComputedStyle(document.documentElement).getPropertyValue("--primary")')
 }
 
 /**

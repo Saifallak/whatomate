@@ -27,7 +27,7 @@ const modelValue = computed({
     :placeholder="placeholder"
     :disabled="disabled"
     :class="cn(
-      'flex h-10 w-full rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/50 focus-visible:border-emerald-500/50 disabled:cursor-not-allowed disabled:opacity-50 light:bg-white light:border-gray-200 light:text-gray-900 light:placeholder:text-gray-400 light:focus-visible:ring-emerald-500 light:focus-visible:border-emerald-500',
+      'flex h-10 w-full rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-2 text-sm text-white placeholder:text-white/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 focus-visible:border-primary/50 disabled:cursor-not-allowed disabled:opacity-50 light:bg-white light:border-gray-200 light:text-gray-900 light:placeholder:text-gray-400 light:focus-visible:ring-primary light:focus-visible:border-primary',
       props.class
     )"
   />

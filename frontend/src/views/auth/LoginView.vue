@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'vue-sonner'
-import { MessageSquare, Loader2 } from 'lucide-vue-next'
+import { Loader2 } from 'lucide-vue-next'
 import { appConfig } from '@/config/app'
 
 interface SSOProvider {
@@ -95,9 +95,7 @@ const initiateSSO = (provider: string) => {
     <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
       <div class="p-8 space-y-1 text-center">
         <div class="flex justify-center mb-4">
-          <div class="h-12 w-12 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <MessageSquare class="h-7 w-7 text-white" />
-          </div>
+          <img :src="appConfig.icon" :alt="appConfig.name + ' logo'" class="h-12 w-12" />
         </div>
         <h2 class="text-2xl font-bold text-white light:text-gray-900">Welcome to {{ appConfig.name }}</h2>
         <p class="text-white/50 light:text-gray-500">
@@ -129,7 +127,7 @@ const initiateSSO = (provider: string) => {
               autocomplete="current-password"
             />
           </div>
-          <Button type="submit" class="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white shadow-lg shadow-emerald-500/20" :disabled="isLoading">
+          <Button type="submit" class="w-full bg-gradient-to-r from-primary-gradient-start to-primary-gradient-end hover:brightness-110 text-white shadow-lg shadow-primary/20" :disabled="isLoading">
             <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
             Sign in
           </Button>
@@ -163,7 +161,7 @@ const initiateSSO = (provider: string) => {
       <div class="px-8 pb-8">
         <p class="text-sm text-center text-white/40 light:text-gray-500">
           Don't have an account?
-          <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
+          <RouterLink to="/register" class="text-primary light:text-primary hover:underline">
             Sign up
           </RouterLink>
         </p>

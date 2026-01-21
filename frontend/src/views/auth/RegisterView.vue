@@ -5,9 +5,8 @@ import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'vue-sonner'
-import { MessageSquare, Loader2 } from 'lucide-vue-next'
+import { Loader2 } from 'lucide-vue-next'
 import { appConfig } from '@/config/app'
 
 const router = useRouter()
@@ -57,21 +56,19 @@ const handleRegister = async () => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 light:from-violet-50 light:to-violet-100 p-4">
-    <Card class="w-full max-w-md">
-      <CardHeader class="space-y-1 text-center">
+  <div class="min-h-screen flex items-center justify-center bg-[#0a0a0b] light:bg-gradient-to-br light:from-gray-50 light:to-gray-100 p-4">
+    <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
+      <div class="p-8 space-y-1 text-center">
         <div class="flex justify-center mb-4">
-          <div class="h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
-            <MessageSquare class="h-7 w-7 text-primary-foreground" />
-          </div>
+          <img :src="appConfig.icon" :alt="appConfig.name + ' logo'" class="h-12 w-12" />
         </div>
-        <CardTitle class="text-2xl font-bold">Create an account</CardTitle>
-        <CardDescription>
+        <h2 class="text-2xl font-bold text-white light:text-gray-900">Create an account</h2>
+        <p class="text-white/50 light:text-gray-500">
           Start your WhatsApp Business journey with {{ appConfig.name }}
-        </CardDescription>
-      </CardHeader>
+        </p>
+      </div>
       <form @submit.prevent="handleRegister">
-        <CardContent class="space-y-4">
+        <div class="px-8 pb-4 space-y-4">
           <div class="space-y-2">
             <Label for="fullName">Full Name</Label>
             <Input
@@ -126,20 +123,20 @@ const handleRegister = async () => {
               autocomplete="new-password"
             />
           </div>
-        </CardContent>
-        <CardFooter class="flex flex-col space-y-4">
-          <Button type="submit" class="w-full" :disabled="isLoading">
+        </div>
+        <div class="px-8 pb-8">
+          <Button type="submit" class="w-full mb-4" :disabled="isLoading">
             <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
             Create account
           </Button>
-          <p class="text-sm text-center text-muted-foreground">
+          <p class="text-sm text-center text-white/40 light:text-gray-500">
             Already have an account?
             <RouterLink to="/login" class="text-primary hover:underline">
               Sign in
             </RouterLink>
           </p>
-        </CardFooter>
+        </div>
       </form>
-    </Card>
+    </div>
   </div>
 </template>
