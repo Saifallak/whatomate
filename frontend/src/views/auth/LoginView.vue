@@ -6,10 +6,11 @@ import { api } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'vue-sonner'
 import { MessageSquare, Loader2 } from 'lucide-vue-next'
+import { appConfig } from '@/config/app'
 
 interface SSOProvider {
   provider: string
@@ -98,7 +99,7 @@ const initiateSSO = (provider: string) => {
             <MessageSquare class="h-7 w-7 text-white" />
           </div>
         </div>
-        <h2 class="text-2xl font-bold text-white light:text-gray-900">Welcome to Whatomate</h2>
+        <h2 class="text-2xl font-bold text-white light:text-gray-900">Welcome to {{ appConfig.name }}</h2>
         <p class="text-white/50 light:text-gray-500">
           Enter your credentials to access your account
         </p>

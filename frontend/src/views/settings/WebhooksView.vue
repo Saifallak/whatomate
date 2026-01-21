@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { toast } from 'vue-sonner'
 import { Plus, Trash2, Pencil, Webhook as WebhookIcon, Play, Loader2 } from 'lucide-vue-next'
+import { appConfig } from '@/config/app'
 
 const organizationsStore = useOrganizationsStore()
 
@@ -381,7 +382,7 @@ onMounted(() => {
         <DialogHeader>
           <DialogTitle>{{ isEditing ? 'Edit Webhook' : 'Add Webhook' }}</DialogTitle>
           <DialogDescription>
-            Configure a webhook to receive events from Whatomate
+            Configure a webhook to receive events from {{ appConfig.name }}
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-4 py-4">

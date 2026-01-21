@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'vue-sonner'
 import { MessageSquare, Loader2 } from 'lucide-vue-next'
+import { appConfig } from '@/config/app'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -66,7 +67,7 @@ const handleRegister = async () => {
         </div>
         <CardTitle class="text-2xl font-bold">Create an account</CardTitle>
         <CardDescription>
-          Start your WhatsApp Business journey with Whatomate
+          Start your WhatsApp Business journey with {{ appConfig.name }}
         </CardDescription>
       </CardHeader>
       <form @submit.prevent="handleRegister">
