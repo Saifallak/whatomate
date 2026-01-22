@@ -296,7 +296,7 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("Authorization", "Bearer "+account.AccessToken)
 
-	resp, err := a.HTTPClient.Do(req)
+resp, err := a.HTTPClient.Do(req)
 	if err != nil {
 		return r.SendEnvelope(map[string]interface{}{
 			"success": false,
@@ -376,7 +376,9 @@ func generateVerifyToken() string {
 // It checks both the phone number endpoint and business account endpoint
 // and verifies that the phone number actually belongs to the specified business account
 func (a *App) validateAccountCredentials(phoneID, businessID, accessToken, apiVersion string) error {
-	client := &http.Client{}
+	// Reuse the existing WhatsApp client's HTTP client (already configured with 30s timeout)
+	// This prevents socket exhaustion and ensures proper connection pooling
+	client := a.WhatsApp.HTTPClient
 
 	// 1. Validate PhoneID and get its WABA ID
 	phoneURL := fmt.Sprintf("%s/%s/%s?fields=display_phone_number,verified_name,code_verification_status,account_mode,name_status,quality_rating,messaging_limit_tier",
