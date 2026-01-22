@@ -80,7 +80,8 @@ import { formatTime, getInitials, truncate } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
-import { Info } from 'lucide-vue-next'
+import TemplateMessageDialog from '@/components/chat/TemplateMessageDialog.vue'
+import { Info, AlertTriangle } from 'lucide-vue-next'
 
 // Avatar gradient colors - consistent per contact based on name hash
 const avatarGradients = [
@@ -151,6 +152,30 @@ const emojiPickerOpen = ref(false)
 // Custom actions state
 const customActions = ref<CustomAction[]>([])
 const executingActionId = ref<string | null>(null)
+
+// Template message dialog state
+const isTemplateDialogOpen = ref(false)
+
+// 24h window check - find last incoming message
+const lastIncomingMessage = computed(() => {
+  const messages = contactsStore.messages
+  // Iterate in reverse to find the most recent incoming message
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].direction === 'incoming') {
+      return messages[i]
+    }
+  }
+  return null
+})
+
+// Check if we're within the 24h messaging window
+const isWithin24Hours = computed(() => {
+  if (!lastIncomingMessage.value) return false
+  const lastMessageTime = new Date(lastIncomingMessage.value.created_at).getTime()
+  const now = Date.now()
+  const twentyFourHoursMs = 24 * 60 * 60 * 1000
+  return (now - lastMessageTime) < twentyFourHoursMs
+})
 
 const contactId = computed(() => route.params.contactId as string | undefined)
 
@@ -1744,7 +1769,29 @@ async function sendMediaMessage() {
 
         <!-- Message Input -->
         <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
-          <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
+          <!-- 24h Window Closed Warning -->
+          <div
+            v-if="!isWithin24Hours && contactsStore.messages.length > 0"
+            class="mb-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-3"
+          >
+            <AlertTriangle class="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-amber-400 light:text-amber-600">24-hour messaging window closed</p>
+              <p class="text-xs text-amber-400/70 light:text-amber-600/70 mt-0.5">
+                You can only send template messages outside the 24-hour window.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              class="bg-amber-500 hover:bg-amber-600 text-black font-medium shrink-0"
+              @click="isTemplateDialogOpen = true"
+            >
+              <Send class="h-3.5 w-3.5 mr-1.5" />
+              Send Template
+            </Button>
+          </div>
+
+          <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200" :class="{ 'opacity-50 pointer-events-none': !isWithin24Hours && contactsStore.messages.length > 0 }">
             <Tooltip>
               <TooltipTrigger as-child>
                 <span>
@@ -1955,6 +2002,13 @@ async function sendMediaMessage() {
         </div>
       </DialogContent>
     </Dialog>
+
+    <!-- Template Message Dialog -->
+    <TemplateMessageDialog
+      v-model:open="isTemplateDialogOpen"
+      :contact-id="contactsStore.currentContact?.id ?? ''"
+      :whatsapp-account="(contactsStore.currentContact as any)?.whatsapp_account"
+    />
   </div>
 </template>
 
