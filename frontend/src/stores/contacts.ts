@@ -1,6 +1,6 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { contactsService, messagesService } from '@/services/api'
+import {defineStore} from 'pinia'
+import {computed, ref} from 'vue'
+import {contactsService, messagesService} from '@/services/api'
 
 export interface Contact {
   id: string
@@ -14,6 +14,7 @@ export interface Contact {
   last_message_at?: string
   unread_count: number
   assigned_user_id?: string
+  whatsapp_account?: string
   created_at: string
   updated_at: string
 }
@@ -225,16 +226,16 @@ export const useContactsStore = defineStore('contacts', () => {
     replyingTo.value = null
   }
 
-  async function sendTemplate(contactId: string, templateName: string, components?: any[]) {
+  async function sendTemplate(contactId: string, templateName: string, templateParams?: Record<string, string>) {
     try {
       const response = await messagesService.sendTemplate(contactId, {
         template_name: templateName,
-        components
+        template_params: templateParams
       })
-      const newMessage = response.data
-      // Use addMessage which has duplicate checking (WebSocket may also broadcast this)
-      addMessage(newMessage)
-      return newMessage
+      // API returns {message_id, status, template_name, phone_number}
+      // The full message will be broadcast via WebSocket, so don't add partial data
+      // Just return the result for confirmation
+      return response.data.data || response.data
     } catch (error) {
       console.error('Failed to send template:', error)
       throw error
