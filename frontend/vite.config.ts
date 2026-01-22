@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
           return html
             .replace(/%VITE_APP_NAME%/g, env.VITE_APP_NAME || 'Whatomate')
             .replace(/%VITE_APP_DESCRIPTION%/g, env.VITE_APP_DESCRIPTION || 'WhatsApp Business Platform')
+            .replace(/%VITE_APP_ICON%/g, env.VITE_APP_ICON || '/favicon.svg')
         }
       }
     ],
