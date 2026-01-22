@@ -291,7 +291,7 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 	}
 
 	// Fetch additional details for display
-	url := fmt.Sprintf("%s/%s/%s?fields=display_phone_number,verified_name,quality_rating,messaging_limit_tier",
+	url := fmt.Sprintf("%s/%s/%s?fields=display_phone_number,verified_name,code_verification_status,quality_rating,messaging_limit_tier",
 		a.Config.WhatsApp.BaseURL, account.APIVersion, account.PhoneID)
 
 	req, _ := http.NewRequest("GET", url, nil)
@@ -323,11 +323,12 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 	_ = json.Unmarshal(body, &result)
 
 	return r.SendEnvelope(map[string]interface{}{
-		"success":              true,
-		"display_phone_number": result["display_phone_number"],
-		"verified_name":        result["verified_name"],
-		"quality_rating":       result["quality_rating"],
-		"messaging_limit_tier": result["messaging_limit_tier"],
+		"success":                  true,
+		"display_phone_number":     result["display_phone_number"],
+		"verified_name":            result["verified_name"],
+		"quality_rating":           result["quality_rating"],
+		"messaging_limit_tier":     result["messaging_limit_tier"],
+		"code_verification_status": result["code_verification_status"],
 	})
 }
 
@@ -400,9 +401,11 @@ func (a *App) validateAccountCredentials(phoneID, businessID, accessToken, apiVe
 	}
 
 	// Check if phone number is verified/registered
+	// Only fail if the status is explicitly NOT_VERIFIED or EXPIRED
+	// Some accounts (like test numbers) may not have this field or have different values
 	if verificationStatus, ok := phoneResult["code_verification_status"].(string); ok {
-		if verificationStatus != "VERIFIED" {
-			return fmt.Errorf("phone number is not verified. Please register it at: https://business.facebook.com/wa/manage/phone-numbers/")
+		if verificationStatus == "NOT_VERIFIED" || verificationStatus == "EXPIRED" {
+			return fmt.Errorf("phone number is not verified (status: %s). Please register it at: https://business.facebook.com/wa/manage/phone-numbers/", verificationStatus)
 		}
 	}
 
