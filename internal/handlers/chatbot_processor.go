@@ -122,7 +122,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 
 	// Get or create contact (always do this for all incoming messages)
-	contact, isNewContact := a.getOrCreateContact(account.OrganizationID, msg.From, profileName)
+	contact, isNewContact := a.getOrCreateContact(account.OrganizationID, msg.From, profileName, account.Name)
 
 	// Dispatch webhook if new contact was created
 	if isNewContact {
@@ -659,7 +659,7 @@ func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *m
 
 // getOrCreateContact finds or creates a contact for the phone number
 // Returns the contact and a boolean indicating if the contact was newly created
-func (a *App) getOrCreateContact(orgID uuid.UUID, phoneNumber, profileName string) (*models.Contact, bool) {
+func (a *App) getOrCreateContact(orgID uuid.UUID, phoneNumber, profileName, accountName string) (*models.Contact, bool) {
 	var contact models.Contact
 	result := a.DB.Where("organization_id = ? AND phone_number = ?", orgID, phoneNumber).First(&contact)
 	if result.Error == nil {
@@ -667,15 +667,21 @@ func (a *App) getOrCreateContact(orgID uuid.UUID, phoneNumber, profileName strin
 		if profileName != "" && contact.ProfileName != profileName {
 			a.DB.Model(&contact).Update("profile_name", profileName)
 		}
+		// Update whatsapp_account if not set (for migrating old contacts)
+		if contact.WhatsAppAccount == "" && accountName != "" {
+			a.DB.Model(&contact).Update("whatsapp_account", accountName)
+			contact.WhatsAppAccount = accountName
+		}
 		return &contact, false
 	}
 
 	// Create new contact
 	contact = models.Contact{
-		BaseModel:      models.BaseModel{ID: uuid.New()},
-		OrganizationID: orgID,
-		PhoneNumber:    phoneNumber,
-		ProfileName:    profileName,
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  orgID,
+		PhoneNumber:     phoneNumber,
+		ProfileName:     profileName,
+		WhatsAppAccount: accountName,
 	}
 	if err := a.DB.Create(&contact).Error; err != nil {
 		a.Log.Error("Failed to create contact", "error", err)
@@ -2200,7 +2206,7 @@ func (a *App) handleIncomingReaction(account *models.WhatsAppAccount, fromPhone,
 	}
 
 	// Get or create contact
-	contact, _ := a.getOrCreateContact(account.OrganizationID, fromPhone, profileName)
+	contact, _ := a.getOrCreateContact(account.OrganizationID, fromPhone, profileName, account.Name)
 
 	// Parse existing reactions from Metadata
 	var metadata map[string]interface{}
