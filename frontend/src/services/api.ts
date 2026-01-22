@@ -145,8 +145,8 @@ export const messagesService = {
     api.get(`/contacts/${contactId}/messages`, { params }),
   send: (contactId: string, data: { type: string; content: any; reply_to_message_id?: string }) =>
     api.post(`/contacts/${contactId}/messages`, data),
-  sendTemplate: (contactId: string, data: { template_name: string; components?: any[] }) =>
-    api.post(`/contacts/${contactId}/messages/template`, data),
+  sendTemplate: (contactId: string, data: { template_name: string; template_params?: Record<string, string> }) =>
+    api.post('/messages/template', { contact_id: contactId, ...data }),
   sendReaction: (contactId: string, messageId: string, emoji: string) =>
     api.post(`/contacts/${contactId}/messages/${messageId}/reaction`, { emoji })
 }
