@@ -365,7 +365,7 @@ func (a *App) validateAccountCredentials(phoneID, businessID, accessToken, apiVe
 	client := &http.Client{}
 
 	// 1. Validate PhoneID and get its WABA ID
-	phoneURL := fmt.Sprintf("%s/%s/%s?fields=display_phone_number,verified_name,account_mode,name_status,quality_rating,messaging_limit_tier",
+	phoneURL := fmt.Sprintf("%s/%s/%s?fields=display_phone_number,verified_name,code_verification_status,account_mode,name_status,quality_rating,messaging_limit_tier",
 		a.Config.WhatsApp.BaseURL, apiVersion, phoneID)
 
 	phoneReq, err := http.NewRequest("GET", phoneURL, nil)
@@ -391,6 +391,19 @@ func (a *App) validateAccountCredentials(phoneID, businessID, accessToken, apiVe
 			}
 		}
 		return fmt.Errorf("invalid phone_id or access_token (status %d)", phoneResp.StatusCode)
+	}
+
+	// Parse phone response to check verification status
+	var phoneResult map[string]interface{}
+	if err := json.Unmarshal(phoneBody, &phoneResult); err != nil {
+		return fmt.Errorf("failed to parse phone response: %w", err)
+	}
+
+	// Check if phone number is verified/registered
+	if verificationStatus, ok := phoneResult["code_verification_status"].(string); ok {
+		if verificationStatus != "VERIFIED" {
+			return fmt.Errorf("phone number is not verified. Please register it at: https://business.facebook.com/wa/manage/phone-numbers/")
+		}
 	}
 
 	// 2. Validate BusinessID
