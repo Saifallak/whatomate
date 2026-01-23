@@ -81,7 +81,8 @@ import { useColorMode } from '@/composables/useColorMode'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import TemplateMessageDialog from '@/components/chat/TemplateMessageDialog.vue'
-import { Info, AlertTriangle } from 'lucide-vue-next'
+import { Info, AlertTriangle, Plus } from 'lucide-vue-next'
+import NewChatDialog from '@/views/chat/NewChatDialog.vue'
 
 // Avatar gradient colors - consistent per contact based on name hash
 const avatarGradients = [
@@ -155,6 +156,8 @@ const executingActionId = ref<string | null>(null)
 
 // Template message dialog state
 const isTemplateDialogOpen = ref(false)
+const isNewChatDialogOpen = ref(false)
+const isNewChatDialogOpen = ref(false)
 
 // 24h window check - find last incoming message
 const lastIncomingMessage = computed(() => {
@@ -1201,8 +1204,8 @@ async function sendMediaMessage() {
     <!-- Contacts List -->
     <div class="w-80 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
       <!-- Search Header -->
-      <div class="p-2 border-b border-white/[0.08] light:border-gray-200">
-        <div class="relative">
+      <div class="p-2 border-b border-white/[0.08] light:border-gray-200 flex gap-2">
+        <div class="relative flex-1">
           <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40 light:text-gray-400" />
           <Input
             v-model="contactsStore.searchQuery"
@@ -1210,6 +1213,14 @@ async function sendMediaMessage() {
             class="pl-8 h-8 text-sm bg-white/[0.04] border-white/[0.1] text-white placeholder:text-white/40 light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:placeholder:text-gray-400"
           />
         </div>
+        <Button
+            size="icon"
+            variant="ghost"
+            class="h-8 w-8 bg-white/[0.04] border border-white/[0.1] text-white hover:bg-white/[0.08] light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:hover:bg-gray-100"
+            @click="isNewChatDialogOpen = true"
+        >
+            <Plus class="h-4 w-4" />
+        </Button>
       </div>
 
       <!-- Contacts -->
@@ -2009,6 +2020,16 @@ async function sendMediaMessage() {
       v-model:open="isTemplateDialogOpen"
       :contact-id="contactsStore.currentContact?.id ?? ''"
       :whatsapp-account="(contactsStore.currentContact as any)?.whatsapp_account"
+    />
+    <NewChatDialog
+      :open="isNewChatDialogOpen"
+      @update:open="isNewChatDialogOpen = $event"
+      @chat-created="(id) => selectContact(id)"
+    />
+    <NewChatDialog
+      :open="isNewChatDialogOpen"
+      @update:open="isNewChatDialogOpen = $event"
+      @chat-created="(id) => selectContact(id)"
     />
   </div>
 </template>
