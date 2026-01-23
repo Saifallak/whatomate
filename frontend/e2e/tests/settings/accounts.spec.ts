@@ -292,4 +292,40 @@ test.describe('Account Test Connection Details', () => {
     await expect(accountCard.getByText('Test Number')).toBeVisible()
     await expect(accountCard.getByText('This is a test number, messaging limits apply')).toBeVisible()
   })
+
+  test('should show loading state while testing connection', async ({ page }) => {
+    // Intercept and delay request to verify loading state
+    let fulfillCallback: () => void;
+    const responsePromise = new Promise<void>((resolve) => {
+      fulfillCallback = resolve;
+    });
+
+    await page.route('**/api/accounts/*/test', async route => {
+      await responsePromise;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { success: true } })
+      })
+    });
+
+    const accountCard = page.locator('.rounded-xl.border').filter({ hasText: 'Test Account' })
+    const testBtn = accountCard.getByRole('button', { name: /Test/i })
+
+    // Start the action
+    await testBtn.click()
+
+    // Verify loading state
+    await expect(testBtn).toBeDisabled()
+    // Check for the loader icon (lucide-loader-2 typically has a specific class or we can check for the svg)
+    // Based on the vue file: <Loader2 ... class="animate-spin" />
+    await expect(testBtn.locator('.animate-spin')).toBeVisible()
+
+    // Finish the request
+    fulfillCallback!()
+
+    // Verify loading state ends
+    await expect(testBtn).not.toBeDisabled()
+    await expect(testBtn.locator('.animate-spin')).not.toBeVisible()
+  })
 })
