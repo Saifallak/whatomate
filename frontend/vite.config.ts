@@ -13,9 +13,9 @@ export default defineConfig(({ mode }) => {
         name: 'html-transform',
         transformIndexHtml(html) {
           return html
-            .replace(/%VITE_APP_NAME%/g, env.VITE_APP_NAME || 'Whatomate')
-            .replace(/%VITE_APP_DESCRIPTION%/g, env.VITE_APP_DESCRIPTION || 'WhatsApp Business Platform')
-            .replace(/%VITE_APP_ICON%/g, env.VITE_APP_ICON || '/favicon.svg')
+            .replace(/__VITE_APP_NAME__/g, env.VITE_APP_NAME || 'Whatomate')
+            .replace(/__VITE_APP_DESCRIPTION__/g, env.VITE_APP_DESCRIPTION || 'WhatsApp Business Platform')
+            .replace(/__VITE_APP_ICON__/g, env.VITE_APP_ICON || '/favicon.svg')
         }
       }
     ],
