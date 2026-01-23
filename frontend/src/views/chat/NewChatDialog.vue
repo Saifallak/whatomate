@@ -58,26 +58,50 @@ const templatePlaceholders = computed(() => {
   return [...new Set(matches)].sort()
 })
 
+// Watch account change to fetch templates
+import { watch } from 'vue'
+watch(selectedAccount, async (newAccount) => {
+  if (!newAccount) {
+    templates.value = []
+    return
+  }
+  
+  isLoading.value = true
+  try {
+    // Determine the account identifier to send (usually ID or phone number ID depending on backend)
+    // The previous component sent 'account=...'
+    // API service takes { status: 'APPROVED' }
+    // We might need to manually append account if service doesn't support it in params object perfectly, 
+    // but looking at logic: `api.get('/templates', { params })`
+    // So we pass { status: 'APPROVED', account: newAccount }
+    const response = await templatesService.list({ 
+        status: 'APPROVED',
+        account: newAccount // We assume backend filters by 'account' param
+    })
+    const data = response.data.data || response.data
+    templates.value = data.templates || data || []
+  } catch (error) {
+    console.error('Failed to load templates:', error)
+    toast.error('Failed to load templates')
+  } finally {
+    isLoading.value = false
+  }
+})
+
 async function fetchData() {
   isLoading.value = true
   try {
-    const [accRes, tplRes] = await Promise.all([
-      accountsService.list(),
-      templatesService.list({ status: 'APPROVED' })
-    ])
+    const response = await accountsService.list()
+    const data = response.data.data || response.data
+    accounts.value = data.accounts || []
     
-    const accData = accRes.data.data || accRes.data
-    accounts.value = accData.accounts || []
     if (accounts.value.length > 0) {
-      selectedAccount.value = accounts.value[0].whatsapp_account_id || accounts.value[0].phone_number_id || '' // Adjust based on actual API response structure
+      // Default to first account
+      selectedAccount.value = accounts.value[0].id || accounts.value[0].whatsapp_account_id
     }
-
-    const tplData = tplRes.data.data || tplRes.data
-    templates.value = tplData.templates || tplData || []
   } catch (error) {
-    console.error('Failed to load data:', error)
-    toast.error('Failed to load accounts or templates')
-  } finally {
+    console.error('Failed to load accounts:', error)
+    toast.error('Failed to load accounts')
     isLoading.value = false
   }
 }
@@ -144,7 +168,7 @@ onMounted(() => {
 
 <template>
   <Dialog :open="open" @update:open="$emit('update:open', $event)">
-    <DialogContent class="sm:max-w-[425px] bg-[#1c1c1e] text-white border-white/10">
+    <DialogContent class="sm:max-w-[425px]">
       <DialogHeader>
         <DialogTitle>Start New Conversation</DialogTitle>
         <DialogDescription>
@@ -153,15 +177,15 @@ onMounted(() => {
       </DialogHeader>
 
       <div v-if="isLoading" class="flex justify-center py-8">
-        <Loader2 class="h-8 w-8 animate-spin text-white/50" />
+        <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
 
       <div v-else class="grid gap-4 py-4">
-        <!-- Account Selection (only if multiple?) -->
-        <div class="grid gap-2" v-if="accounts.length > 1">
+        <!-- Account Selection -->
+        <div class="grid gap-2" v-if="accounts.length > 0">
           <Label>WhatsApp Account</Label>
           <Select v-model="selectedAccount">
-            <SelectTrigger class="bg-white/5 border-white/10 text-white">
+            <SelectTrigger>
               <SelectValue placeholder="Select account" />
             </SelectTrigger>
             <SelectContent>
@@ -177,7 +201,6 @@ onMounted(() => {
           <Input 
             v-model="phoneNumber" 
             placeholder="+1234567890" 
-            class="bg-white/5 border-white/10 text-white placeholder:text-white/30"
           />
         </div>
 
@@ -186,14 +209,13 @@ onMounted(() => {
           <Input 
             v-model="contactName" 
             placeholder="John Doe" 
-            class="bg-white/5 border-white/10 text-white placeholder:text-white/30"
           />
         </div>
 
         <div class="grid gap-2">
           <Label>Template</Label>
           <Select v-model="selectedTemplate">
-            <SelectTrigger class="bg-white/5 border-white/10 text-white">
+            <SelectTrigger>
               <SelectValue placeholder="Select a template" />
             </SelectTrigger>
             <SelectContent class="max-h-[200px]">
@@ -205,19 +227,19 @@ onMounted(() => {
         </div>
 
         <!-- Dynamic Template Params -->
-        <div v-if="templatePlaceholders.length > 0" class="grid gap-2 border-t border-white/10 pt-2 mt-2">
-          <Label class="text-xs text-white/50">Template Variables</Label>
+        <div v-if="templatePlaceholders.length > 0" class="grid gap-2 border-t pt-2 mt-2">
+          <Label class="text-xs text-muted-foreground">Template Variables</Label>
           <div v-for="placeholder in templatePlaceholders" :key="placeholder" class="grid grid-cols-4 items-center gap-2">
             <Label class="text-right text-xs">{{ placeholder }}</Label>
             <Input 
               v-model="templateParams[placeholder]" 
-              class="col-span-3 h-8 text-xs bg-white/5 border-white/10 text-white" 
+              class="col-span-3 h-8 text-xs" 
               :placeholder="`Value for ${placeholder}`"
             />
           </div>
         </div>
 
-        <div class="text-xs text-white/40 italic" v-if="currentTemplate">
+        <div class="text-xs text-muted-foreground italic" v-if="currentTemplate">
           Preview: {{ currentTemplate.body_content }}
         </div>
       </div>
