@@ -107,7 +107,7 @@ async function fetchData() {
 }
 
 async function handleSubmit() {
-  if (!phoneNumber.value || !selectedTemplate.value) return
+  if (!phoneNumber.value || !selectedTemplate.value || !selectedAccount.value) return
 
   isSubmitting.value = true
   try {
@@ -182,8 +182,8 @@ onMounted(() => {
 
       <div v-else class="grid gap-4 py-4">
         <!-- Account Selection -->
-        <div class="grid gap-2" v-if="accounts.length > 0">
-          <Label>WhatsApp Account</Label>
+        <div class="grid gap-2">
+          <Label>WhatsApp Account <span class="text-red-500">*</span></Label>
           <Select v-model="selectedAccount">
             <SelectTrigger>
               <SelectValue placeholder="Select account" />
@@ -192,12 +192,15 @@ onMounted(() => {
               <SelectItem v-for="acc in accounts" :key="acc.id" :value="acc.id">
                 {{ acc.name }} ({{ acc.phone_number }})
               </SelectItem>
+              <div v-if="accounts.length === 0" class="p-2 text-sm text-muted-foreground text-center">
+                No accounts found
+              </div>
             </SelectContent>
           </Select>
         </div>
 
         <div class="grid gap-2">
-          <Label>Phone Number</Label>
+          <Label>Phone Number <span class="text-red-500">*</span></Label>
           <Input 
             v-model="phoneNumber" 
             placeholder="+1234567890" 
@@ -213,7 +216,7 @@ onMounted(() => {
         </div>
 
         <div class="grid gap-2">
-          <Label>Template</Label>
+          <Label>Template <span class="text-red-500">*</span></Label>
           <Select v-model="selectedTemplate">
             <SelectTrigger>
               <SelectValue placeholder="Select a template" />
@@ -248,7 +251,7 @@ onMounted(() => {
         <Button variant="ghost" @click="$emit('update:open', false)">Cancel</Button>
         <Button 
             @click="handleSubmit" 
-            :disabled="!phoneNumber || !selectedTemplate || isSubmitting"
+            :disabled="!phoneNumber || !selectedTemplate || !selectedAccount || isSubmitting"
             class="bg-emerald-600 hover:bg-emerald-700 text-white"
         >
           <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
