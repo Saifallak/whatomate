@@ -280,7 +280,7 @@ test.describe('Account Test Connection Details', () => {
             success: true,
             display_phone_number: '+1 555 9999',
             is_test_number: true,
-            warning: 'This is a test number, messaging limits apply'
+            warning: 'This is a trial number, messaging limits apply'
           }
         })
       })
@@ -290,7 +290,7 @@ test.describe('Account Test Connection Details', () => {
     await accountCard.getByRole('button', { name: /Test/i }).click()
 
     await expect(accountCard.getByText('Test Number')).toBeVisible()
-    await expect(accountCard.getByText('This is a test number, messaging limits apply')).toBeVisible()
+    await expect(accountCard.getByText('This is a trial number, messaging limits apply')).toBeVisible()
   })
 
   test('should show loading state while testing connection', async ({ page }) => {
