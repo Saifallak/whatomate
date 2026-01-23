@@ -157,7 +157,7 @@ const executingActionId = ref<string | null>(null)
 // Template message dialog state
 const isTemplateDialogOpen = ref(false)
 const isNewChatDialogOpen = ref(false)
-const isNewChatDialogOpen = ref(false)
+
 
 // 24h window check - find last incoming message
 const lastIncomingMessage = computed(() => {
@@ -2026,11 +2026,7 @@ async function sendMediaMessage() {
       @update:open="isNewChatDialogOpen = $event"
       @chat-created="(id) => selectContact(id)"
     />
-    <NewChatDialog
-      :open="isNewChatDialogOpen"
-      @update:open="isNewChatDialogOpen = $event"
-      @chat-created="(id) => selectContact(id)"
-    />
+
   </div>
 </template>
 
