@@ -164,6 +164,10 @@ async function handleSubmit() {
 onMounted(() => {
     if (props.open) fetchData()
 })
+
+watch(() => props.open, (newVal) => {
+    if (newVal) fetchData()
+})
 </script>
 
 <template>
@@ -190,7 +194,7 @@ onMounted(() => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="acc in accounts" :key="acc.id" :value="acc.id">
-                {{ acc.name }} ({{ acc.phone_number }})
+                {{ acc.name }} ({{ acc.phone_number || acc.phone_id }})
               </SelectItem>
               <div v-if="accounts.length === 0" class="p-2 text-sm text-muted-foreground text-center">
                 No accounts found
