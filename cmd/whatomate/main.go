@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -158,14 +159,25 @@ func runServer(args []string) {
 	lo.Info("WebSocket hub started")
 
 	// Initialize app with dependencies
+	// Shared HTTP client with connection pooling for external API calls
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+
 	app := &handlers.App{
-		Config:   cfg,
-		DB:       db,
-		Redis:    rdb,
-		Log:      lo,
-		WhatsApp: waClient,
-		WSHub:    wsHub,
-		Queue:    jobQueue,
+		Config:     cfg,
+		DB:         db,
+		Redis:      rdb,
+		Log:        lo,
+		WhatsApp:   waClient,
+		WSHub:      wsHub,
+		Queue:      jobQueue,
+		HTTPClient: httpClient,
 	}
 
 	// Start campaign stats subscriber for real-time WebSocket updates from worker
@@ -570,7 +582,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.DELETE("/api/teams/{id}", app.DeleteTeam)
 	g.GET("/api/teams/{id}/members", app.ListTeamMembers)
 	g.POST("/api/teams/{id}/members", app.AddTeamMember)
-	g.DELETE("/api/teams/{id}/members/{user_id}", app.RemoveTeamMember)
+	g.DELETE("/api/teams/{id}/members/{member_user_id}", app.RemoveTeamMember)
 
 	// Canned Responses
 	g.GET("/api/canned-responses", app.ListCannedResponses)
@@ -591,6 +603,17 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/analytics/agents", app.GetAgentAnalytics)
 	g.GET("/api/analytics/agents/{id}", app.GetAgentDetails)
 	g.GET("/api/analytics/agents/comparison", app.GetAgentComparison)
+
+	// Dashboard Widgets (customizable analytics)
+	g.GET("/api/dashboard/widgets", app.ListDashboardWidgets)
+	g.POST("/api/dashboard/widgets", app.CreateDashboardWidget)
+	g.GET("/api/dashboard/widgets/data-sources", app.GetWidgetDataSources)
+	g.GET("/api/dashboard/widgets/data", app.GetAllWidgetsData)
+	g.GET("/api/dashboard/widgets/{id}", app.GetDashboardWidget)
+	g.PUT("/api/dashboard/widgets/{id}", app.UpdateDashboardWidget)
+	g.DELETE("/api/dashboard/widgets/{id}", app.DeleteDashboardWidget)
+	g.GET("/api/dashboard/widgets/{id}/data", app.GetWidgetData)
+	g.POST("/api/dashboard/widgets/reorder", app.ReorderDashboardWidgets)
 
 	// Organization Settings
 	g.GET("/api/org/settings", app.GetOrganizationSettings)
