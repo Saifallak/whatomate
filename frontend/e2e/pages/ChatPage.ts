@@ -48,12 +48,14 @@ export class ChatPage extends BasePage {
   }
 
   async selectContact(name: string) {
-    await this.page.locator('.contact-item, [data-testid="contact"]').filter({ hasText: name }).click()
+    // Use flexible selector: data-testid, contact-item class, or cursor-pointer in contact list area
+    const contactSelector = this.page.locator('[data-testid="contact"], .contact-item, .cursor-pointer').filter({ hasText: name })
+    await contactSelector.first().click()
     await this.page.waitForLoadState('networkidle')
   }
 
   getContactItem(name: string): Locator {
-    return this.page.locator('.contact-item, [data-testid="contact"]').filter({ hasText: name })
+    return this.page.locator('[data-testid="contact"], .contact-item, .cursor-pointer').filter({ hasText: name }).first()
   }
 
   // Message helpers
