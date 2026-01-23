@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
-import { loginAsAdmin } from '../helpers'
-import { ChatPage } from '../pages'
+import { loginAsAdmin } from '../../helpers'
+import { ChatPage } from '../../pages'
 
 test.describe('Chat Window 24h Logic', () => {
     let chatPage: ChatPage
