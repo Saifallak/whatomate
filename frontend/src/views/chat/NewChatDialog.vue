@@ -60,23 +60,22 @@ const templatePlaceholders = computed(() => {
 
 // Watch account change to fetch templates
 import { watch } from 'vue'
-watch(selectedAccount, async (newAccount) => {
-  if (!newAccount) {
+watch(selectedAccount, async (newAccountId) => {
+  if (!newAccountId) {
     templates.value = []
     return
   }
   
+  // Find the account object to get the name
+  const account = accounts.value.find(a => a.id === newAccountId)
+  if (!account) return
+
   isLoading.value = true
   try {
-    // Determine the account identifier to send (usually ID or phone number ID depending on backend)
-    // The previous component sent 'account=...'
-    // API service takes { status: 'APPROVED' }
-    // We might need to manually append account if service doesn't support it in params object perfectly, 
-    // but looking at logic: `api.get('/templates', { params })`
-    // So we pass { status: 'APPROVED', account: newAccount }
+    // API appears to expect Account Name for filtering templates, not ID
     const response = await templatesService.list({ 
         status: 'APPROVED',
-        account: newAccount // We assume backend filters by 'account' param
+        account: account.name 
     })
     const data = response.data.data || response.data
     templates.value = data.templates || data || []
