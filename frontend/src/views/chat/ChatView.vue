@@ -1218,6 +1218,7 @@ async function sendMediaMessage() {
           <div
             v-for="contact in contactsStore.sortedContacts"
             :key="contact.id"
+            data-testid="contact"
             :class="[
               'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
               contactsStore.currentContact?.id === contact.id && 'bg-white/[0.08] light:bg-gray-100'
