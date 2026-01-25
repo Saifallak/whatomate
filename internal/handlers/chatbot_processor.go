@@ -661,7 +661,7 @@ func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *m
 // Returns the contact and a boolean indicating if the contact was newly created
 func (a *App) getOrCreateContact(orgID uuid.UUID, phoneNumber, profileName, accountName string) (*models.Contact, bool) {
 	var contact models.Contact
-	result := a.DB.Where("organization_id = ? AND phone_number = ?", orgID, phoneNumber).First(&contact)
+	result := a.DB.Where("organization_id = ? AND phone_number = ? AND whats_app_account = ?", orgID, phoneNumber, accountName).First(&contact)
 	if result.Error == nil {
 		// Update profile name if changed
 		if profileName != "" && contact.ProfileName != profileName {
@@ -669,7 +669,7 @@ func (a *App) getOrCreateContact(orgID uuid.UUID, phoneNumber, profileName, acco
 		}
 		// Update whatsapp_account if not set (for migrating old contacts)
 		if contact.WhatsAppAccount == "" && accountName != "" {
-			a.DB.Model(&contact).Update("whatsapp_account", accountName)
+			a.DB.Model(&contact).Update("whats_app_account", accountName)
 			contact.WhatsAppAccount = accountName
 		}
 		return &contact, false
@@ -685,8 +685,8 @@ func (a *App) getOrCreateContact(orgID uuid.UUID, phoneNumber, profileName, acco
 	}
 	if err := a.DB.Create(&contact).Error; err != nil {
 		a.Log.Error("Failed to create contact", "error", err)
-		// Try to fetch again in case of race condition
-		a.DB.Where("organization_id = ? AND phone_number = ?", orgID, phoneNumber).First(&contact)
+		// Try to fetch again in case of race condition, BUT MUST include account name!
+		a.DB.Where("organization_id = ? AND phone_number = ? AND whats_app_account = ?", orgID, phoneNumber, accountName).First(&contact)
 		return &contact, false
 	}
 	return &contact, true

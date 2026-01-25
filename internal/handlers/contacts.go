@@ -87,6 +87,8 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	page, _ := strconv.Atoi(string(r.RequestCtx.QueryArgs().Peek("page")))
 	limit, _ := strconv.Atoi(string(r.RequestCtx.QueryArgs().Peek("limit")))
 	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+	phoneNumber := string(r.RequestCtx.QueryArgs().Peek("phone_number"))
+	whatsappAccount := string(r.RequestCtx.QueryArgs().Peek("whatsapp_account"))
 
 	if page < 1 {
 		page = 1
@@ -107,6 +109,14 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	if search != "" {
 		searchPattern := "%" + search + "%"
 		query = query.Where("phone_number LIKE ? OR profile_name LIKE ?", searchPattern, searchPattern)
+	}
+
+	// Strict filters
+	if phoneNumber != "" {
+		query = query.Where("phone_number = ?", phoneNumber)
+	}
+	if whatsappAccount != "" {
+		query = query.Where("whats_app_account = ?", whatsappAccount)
 	}
 
 	// Order by last message time (most recent first)
@@ -1156,5 +1166,70 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 		}
 	}
 
+	return r.SendEnvelope(response)
+}
+
+// CreateContactRequest represents the request body for creating a contact
+type CreateContactRequest struct {
+	PhoneNumber     string `json:"phone_number"`
+	Name            string `json:"name"`
+	WhatsAppAccount string `json:"whatsapp_account"`
+}
+
+// CreateContact creates a new contact or returns an existing one
+func (a *App) CreateContact(r *fastglue.Request) error {
+	orgID, err := getOrganizationID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	var req CreateContactRequest
+	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+
+	if req.PhoneNumber == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Phone number is required", nil, "")
+	}
+
+	if req.WhatsAppAccount == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account is required", nil, "")
+	}
+
+	// Verify WhatsApp account exists for this org
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, req.WhatsAppAccount).First(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid WhatsApp account", nil, "")
+	}
+
+	// Use getOrCreateContact to handle existence check and creation logic
+	// This now respects the (Organization, Phone, Account) uniqueness tuple
+	contact, isNew := a.getOrCreateContact(orgID, req.PhoneNumber, req.Name, req.WhatsAppAccount)
+
+	// If Name provided and different, it updates it in getOrCreate.
+
+	response := ContactResponse{
+		ID:                 contact.ID,
+		PhoneNumber:        contact.PhoneNumber,
+		Name:               contact.ProfileName,
+		ProfileName:        contact.ProfileName,
+		Status:             "active",
+		Tags:               []string{}, // New/fetched contact tags... mostly empty if new
+		CustomFields:       contact.Metadata,
+		LastMessageAt:      contact.LastMessageAt,
+		LastMessagePreview: contact.LastMessagePreview,
+		UnreadCount:        0,
+		AssignedUserID:     contact.AssignedUserID,
+		WhatsAppAccount:    contact.WhatsAppAccount,
+		CreatedAt:          contact.CreatedAt,
+		UpdatedAt:          contact.UpdatedAt,
+	}
+
+	statusCode := fasthttp.StatusOK
+	if isNew {
+		statusCode = fasthttp.StatusCreated
+	}
+
+	r.RequestCtx.SetStatusCode(statusCode)
 	return r.SendEnvelope(response)
 }

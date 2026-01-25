@@ -122,7 +122,7 @@ export const accountsService = {
 }
 
 export const contactsService = {
-  list: (params?: { search?: string; page?: number; limit?: number }) =>
+  list: (params?: { search?: string; page?: number; limit?: number; phone_number?: string; whatsapp_account?: string }) =>
     api.get('/contacts', { params }),
   get: (id: string) => api.get(`/contacts/${id}`),
   create: (data: any) => api.post('/contacts', data),
@@ -145,14 +145,14 @@ export const messagesService = {
     api.get(`/contacts/${contactId}/messages`, { params }),
   send: (contactId: string, data: { type: string; content: any; reply_to_message_id?: string }) =>
     api.post(`/contacts/${contactId}/messages`, data),
-  sendTemplate: (contactId: string, data: { template_name: string; template_params?: Record<string, string> }) =>
+  sendTemplate: (contactId: string, data: { template_name: string; template_params?: Record<string, string>; account_name?: string }) =>
     api.post('/messages/template', { contact_id: contactId, ...data }),
   sendReaction: (contactId: string, messageId: string, emoji: string) =>
     api.post(`/contacts/${contactId}/messages/${messageId}/reaction`, { emoji })
 }
 
 export const templatesService = {
-  list: (params?: { status?: string; category?: string }) =>
+  list: (params?: { status?: string; category?: string; account?: string }) =>
     api.get('/templates', { params }),
   get: (id: string) => api.get(`/templates/${id}`),
   create: (data: any) => api.post('/templates', data),

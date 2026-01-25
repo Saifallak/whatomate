@@ -18,7 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import { Loader2 } from 'lucide-vue-next'
 import { contactsService, templatesService, accountsService, messagesService } from '@/services/api'
 import { toast } from 'vue-sonner'
@@ -53,9 +52,10 @@ const currentTemplate = computed(() => {
 
 const templatePlaceholders = computed(() => {
   if (!currentTemplate.value) return []
-  // Extract {{1}}, {{2}} etc from body_content
-  const matches = currentTemplate.value.body_content?.match(/\{\{\d+\}\}/g) || []
-  return [...new Set(matches)].sort()
+  // Extract {{1}}, {{Variable}} etc from body_content
+  const matches = currentTemplate.value.body_content?.match(/\{\{([^}]+)\}\}/g) || []
+  // Strip braces for the key
+  return ([...new Set(matches)] as string[]).map(m => m.replace(/\{\{|\}\}/g, '')).sort()
 })
 
 // Watch account change to fetch templates
@@ -105,43 +105,86 @@ async function fetchData() {
   }
 }
 
+
+const duplicateWarning = ref<string | null>(null)
+
+// Watch phone number to check for existing contacts on other accounts
+// Manual debounce used below
+
+let checkTimeout: any = null
+
+const checkExistingContacts = async (phone: string) => {
+    if (!phone || phone.length < 3) { // Allow check for shorter strings for search-as-you-type
+        duplicateWarning.value = null
+        return
+    }
+    
+    try {
+        const res = await contactsService.list({ search: phone }) // Use search for LIKE match
+        const contacts = res.data.data?.contacts || res.data.contacts || []
+        
+        const account = accounts.value.find(a => a.id === selectedAccount.value)
+        const currentAccountName = account?.name
+        
+        // Filter to ensure we are matching phone number (search also checks name)
+        // and allow partial matches for "search-as-you-type" warning
+        // but prioritize exact match if available
+        const matchingContacts = contacts.filter((c: any) => c.phone_number.includes(phone))
+        
+        const otherAccountContact = matchingContacts.find((c: any) => c.whatsapp_account !== currentAccountName)
+        
+        if (otherAccountContact) {
+            duplicateWarning.value = `Contact "${otherAccountContact.name || otherAccountContact.phone_number}" already exists on account "${otherAccountContact.whatsapp_account}".`
+        } else {
+            duplicateWarning.value = null
+        }
+    } catch (e) {
+        // ignore
+    }
+}
+
+watch(phoneNumber, (newVal) => {
+    if (checkTimeout) clearTimeout(checkTimeout)
+    checkTimeout = setTimeout(() => {
+        checkExistingContacts(newVal)
+    }, 500)
+})
+
+
 async function handleSubmit() {
   if (!phoneNumber.value || !selectedTemplate.value || !selectedAccount.value) return
 
   isSubmitting.value = true
   try {
-    // 1. Create Contact (if not exists logic handled by backend usually, or we just try create)
-    // We'll try to create, if it fails with "exists", we fetch it (simplified: just try create/get)
-    let contactId = ''
+    // Get Account Name
+    const account = accounts.value.find(a => a.id === selectedAccount.value)
+    if (!account) throw new Error('Selected account not found')
     
-    // Check if contact exists locally first to save a call? No, assume we need to ensure backend has it.
+    // 1. Create Contact
+    let contactId = ''
     try {
         const createRes = await contactsService.create({
             phone_number: phoneNumber.value,
             name: contactName.value || phoneNumber.value,
-            whatsapp_account: selectedAccount.value
+            whatsapp_account: account.name // Pass Name, not ID
         })
         const contactData = createRes.data.data || createRes.data
         contactId = contactData.id
     } catch (error: any) {
-        // If 409 conflict, it means contact exists. We should search for it.
-        // For now, let's assume create works or returns existing if logic permits. 
-        // If strict duplicate check fails, we'd need to Search-and-Select. 
-        // But for "New Chat" button, let's assume valid flow.
-        if (error.response?.status === 409) {
-           // Fallback: search? 
-           // For prototype, let's just toast error if duplicate, user should use search.
-           // OR: intelligent backend 'get_or_create' is best.
-           // Let's assume error for now.
-           throw new Error('Contact already exists. Please search for them instead.')
-        }
-        throw error
+         if (error.response?.status === 409) {
+             // Should not happen with new backend logic unless strictly prevented, 
+             // but if it does, it implies we can't create. 
+             // Currently backend returns 200/201 if success/exists-same-account.
+             throw new Error('Contact already exists or could not be created.')
+         }
+         throw error
     }
 
     // 2. Send Template Message
     await messagesService.sendTemplate(contactId, {
         template_name: selectedTemplate.value,
-        template_params: templateParams.value
+        template_params: templateParams.value,
+        account_name: account.name // Pass Account Name
     })
 
     toast.success('Conversation started!')
@@ -208,6 +251,9 @@ watch(() => props.open, (newVal) => {
             v-model="phoneNumber" 
             placeholder="+1234567890" 
           />
+          <div v-if="duplicateWarning" class="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200 mt-1">
+            <span class="font-medium">Notice:</span> {{ duplicateWarning }}
+          </div>
         </div>
 
         <div class="grid gap-2">
@@ -236,7 +282,7 @@ watch(() => props.open, (newVal) => {
         <div v-if="templatePlaceholders.length > 0" class="grid gap-2 border-t pt-2 mt-2">
           <Label class="text-xs text-muted-foreground">Template Variables</Label>
           <div v-for="placeholder in templatePlaceholders" :key="placeholder" class="grid grid-cols-4 items-center gap-2">
-            <Label class="text-right text-xs">{{ placeholder }}</Label>
+            <Label class="text-right text-xs">{{ '{' + placeholder + '}' }}</Label>
             <Input 
               v-model="templateParams[placeholder]" 
               class="col-span-3 h-8 text-xs" 
