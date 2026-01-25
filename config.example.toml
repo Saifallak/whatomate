@@ -45,3 +45,9 @@ s3_bucket = ""
 s3_region = ""
 s3_key = ""
 s3_secret = ""
+
+# Default admin credentials (only used during initial setup when no users exist)
+[default_admin]
+email = "admin@admin.com"
+password = "admin"
+full_name = "Admin"

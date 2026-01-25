@@ -131,7 +131,7 @@ func runServer(args []string) {
 
 	// Run migrations if requested
 	if *migrate {
-		if err := database.RunMigrationWithProgress(db); err != nil {
+		if err := database.RunMigrationWithProgress(db, &cfg.DefaultAdmin); err != nil {
 			lo.Fatal("Migration failed", "error", err)
 		}
 	}
