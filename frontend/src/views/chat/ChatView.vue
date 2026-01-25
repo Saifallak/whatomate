@@ -1303,6 +1303,7 @@ async function sendMediaMessage() {
       <template v-else>
         <!-- Chat Header -->
         <div class="h-14 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between bg-[#0f0f10] light:bg-white">
+          <!-- Standard Input Area -->
           <div class="flex items-center gap-2">
             <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
@@ -1780,9 +1781,31 @@ async function sendMediaMessage() {
 
         <!-- Message Input -->
         <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
+          <!-- No Messages Warning (Force Template) -->
+          <div
+            v-if="contactsStore.messages.length === 0"
+            class="mb-3 px-4 py-3 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-start gap-3"
+          >
+            <Info class="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-blue-400 light:text-blue-600">Start a new conversation</p>
+              <p class="text-xs text-blue-400/70 light:text-blue-600/70 mt-0.5">
+                You must send a template message to initiate the conversation.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              class="bg-blue-500 hover:bg-blue-600 text-white font-medium shrink-0"
+              @click="isTemplateDialogOpen = true"
+            >
+              <Send class="h-3.5 w-3.5 mr-1.5" />
+              Send Template
+            </Button>
+          </div>
+
           <!-- 24h Window Closed Warning -->
           <div
-            v-if="!isWithin24Hours && contactsStore.messages.length > 0"
+            v-else-if="!isWithin24Hours"
             class="mb-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-3"
           >
             <AlertTriangle class="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
@@ -1794,7 +1817,7 @@ async function sendMediaMessage() {
             </div>
             <Button
               size="sm"
-              class="bg-amber-500 hover:bg-amber-600 text-black font-medium shrink-0"
+              class="bg-amber-500 hover:bg-amber-600 text-white font-medium shrink-0"
               @click="isTemplateDialogOpen = true"
             >
               <Send class="h-3.5 w-3.5 mr-1.5" />
@@ -1802,7 +1825,7 @@ async function sendMediaMessage() {
             </Button>
           </div>
 
-          <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200" :class="{ 'opacity-50 pointer-events-none': !isWithin24Hours && contactsStore.messages.length > 0 }">
+          <form v-else @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>
               <TooltipTrigger as-child>
                 <span>
