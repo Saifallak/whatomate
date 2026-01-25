@@ -4,8 +4,12 @@ import { VueQueryPlugin } from '@tanstack/vue-query'
 
 import App from './App.vue'
 import router from './router'
+import { applyColorTheme } from './config/colors'
 
 import './assets/index.css'
+
+// Apply custom color theme from environment variables
+applyColorTheme()
 
 const app = createApp(App)
 
