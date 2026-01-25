@@ -101,3 +101,81 @@ func (a *App) UpdateBusinessProfile(r *fastglue.Request) error {
 
 	return r.SendEnvelope(profile)
 }
+
+// UpdateProfilePicture handles the profile picture upload
+func (a *App) UpdateProfilePicture(r *fastglue.Request) error {
+	orgID, err := getOrganizationID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	idStr := r.RequestCtx.UserValue("id").(string)
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid account ID", nil, "")
+	}
+
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Account not found", nil, "")
+	}
+
+	// 1. Get the file from request
+	fileHeader, err := r.RequestCtx.FormFile("file")
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Missing file", nil, "")
+	}
+
+	// 2. Open and read file
+	file, err := fileHeader.Open()
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to open file", nil, "")
+	}
+	defer file.Close()
+
+	fileSize := fileHeader.Size
+	fileContent := make([]byte, fileSize)
+	_, err = file.Read(fileContent)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file", nil, "")
+	}
+
+	// 3. Upload to Meta to get handle
+	ctx := r.RequestCtx
+	handle, err := a.WhatsApp.UploadProfilePicture(ctx, &whatsapp.Account{
+		PhoneID:     account.PhoneID,
+		BusinessID:  account.BusinessID,
+		AppID:       account.AppID,
+		APIVersion:  account.APIVersion,
+		AccessToken: account.AccessToken,
+	}, fileContent, fileHeader.Header.Get("Content-Type"))
+
+	if err != nil {
+		a.Log.Error("Failed to upload profile picture", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload to Meta: "+err.Error(), nil, "")
+	}
+
+	// 4. Update Business Profile with the handle
+	input := whatsapp.BusinessProfileInput{
+		MessagingProduct:     "whatsapp",
+		ProfilePictureHandle: handle,
+	}
+
+	err = a.WhatsApp.UpdateBusinessProfile(ctx, &whatsapp.Account{
+		PhoneID:     account.PhoneID,
+		BusinessID:  account.BusinessID,
+		AppID:       account.AppID,
+		APIVersion:  account.APIVersion,
+		AccessToken: account.AccessToken,
+	}, input)
+
+	if err != nil {
+		a.Log.Error("Failed to update profile request", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Uploaded but failed to set profile: "+err.Error(), nil, "")
+	}
+
+	return r.SendEnvelope(map[string]string{
+		"message": "Profile picture updated successfully",
+		"handle":  handle,
+	})
+}
