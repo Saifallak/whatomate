@@ -62,7 +62,7 @@ export class AccountsPage extends BasePage {
 
   // Card helpers
   getAccountCard(name: string): Locator {
-    return this.page.locator('.rounded-lg.border').filter({ hasText: name })
+    return this.page.locator('.account-card').filter({ hasText: name })
   }
 
   async editAccount(name: string) {
