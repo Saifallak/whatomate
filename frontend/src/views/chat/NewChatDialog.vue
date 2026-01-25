@@ -114,7 +114,7 @@ const duplicateWarning = ref<string | null>(null)
 let checkTimeout: any = null
 
 const checkExistingContacts = async (phone: string) => {
-    if (!phone || phone.length < 3) { // Allow check for shorter strings for search-as-you-type
+    if (!phone || phone.length < 5) { // Allow check for shorter strings for search-as-you-type
         duplicateWarning.value = null
         return
     }
