@@ -78,7 +78,9 @@ import { getInitials } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
-import { Info } from 'lucide-vue-next'
+import TemplateMessageDialog from '@/components/chat/TemplateMessageDialog.vue'
+import { Info, AlertTriangle, Plus } from 'lucide-vue-next'
+import NewChatDialog from '@/views/chat/NewChatDialog.vue'
 
 // Avatar gradient colors - consistent per contact based on name hash
 const avatarGradients = [
@@ -149,6 +151,32 @@ const emojiPickerOpen = ref(false)
 // Custom actions state
 const customActions = ref<CustomAction[]>([])
 const executingActionId = ref<string | null>(null)
+
+// Template message dialog state
+const isTemplateDialogOpen = ref(false)
+const isNewChatDialogOpen = ref(false)
+
+
+// 24h window check - find last incoming message
+const lastIncomingMessage = computed(() => {
+  const messages = contactsStore.messages
+  // Iterate in reverse to find the most recent incoming message
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].direction === 'incoming') {
+      return messages[i]
+    }
+  }
+  return null
+})
+
+// Check if we're within the 24h messaging window
+const isWithin24Hours = computed(() => {
+  if (!lastIncomingMessage.value) return false
+  const lastMessageTime = new Date(lastIncomingMessage.value.created_at).getTime()
+  const now = Date.now()
+  const twentyFourHoursMs = 24 * 60 * 60 * 1000
+  return (now - lastMessageTime) < twentyFourHoursMs
+})
 
 const contactId = computed(() => route.params.contactId as string | undefined)
 
@@ -1175,8 +1203,8 @@ async function sendMediaMessage() {
     <!-- Contacts List -->
     <div class="w-80 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
       <!-- Search Header -->
-      <div class="p-2 border-b border-white/[0.08] light:border-gray-200">
-        <div class="relative">
+      <div class="p-2 border-b border-white/[0.08] light:border-gray-200 flex gap-2">
+        <div class="relative flex-1">
           <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40 light:text-gray-400" />
           <Input
             v-model="contactsStore.searchQuery"
@@ -1184,6 +1212,14 @@ async function sendMediaMessage() {
             class="pl-8 h-8 text-sm bg-white/[0.04] border-white/[0.1] text-white placeholder:text-white/40 light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:placeholder:text-gray-400"
           />
         </div>
+        <Button
+            size="icon"
+            variant="ghost"
+            class="h-8 w-8 bg-white/[0.04] border border-white/[0.1] text-white hover:bg-white/[0.08] light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:hover:bg-gray-100"
+            @click="isNewChatDialogOpen = true"
+        >
+            <Plus class="h-4 w-4" />
+        </Button>
       </div>
 
       <!-- Contacts -->
@@ -1192,6 +1228,7 @@ async function sendMediaMessage() {
           <div
             v-for="contact in contactsStore.sortedContacts"
             :key="contact.id"
+            data-testid="contact"
             :class="[
               'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
               contactsStore.currentContact?.id === contact.id && 'bg-white/[0.08] light:bg-gray-100'
@@ -1266,6 +1303,7 @@ async function sendMediaMessage() {
       <template v-else>
         <!-- Chat Header -->
         <div class="h-14 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between bg-[#0f0f10] light:bg-white">
+          <!-- Standard Input Area -->
           <div class="flex items-center gap-2">
             <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
@@ -1743,7 +1781,51 @@ async function sendMediaMessage() {
 
         <!-- Message Input -->
         <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
-          <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
+          <!-- No Messages Warning (Force Template) -->
+          <div
+            v-if="contactsStore.messages.length === 0"
+            class="mb-3 px-4 py-3 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-start gap-3"
+          >
+            <Info class="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-blue-400 light:text-blue-600">Start a new conversation</p>
+              <p class="text-xs text-blue-400/70 light:text-blue-600/70 mt-0.5">
+                You must send a template message to initiate the conversation.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              class="bg-blue-500 hover:bg-blue-600 text-white font-medium shrink-0"
+              @click="isTemplateDialogOpen = true"
+            >
+              <Send class="h-3.5 w-3.5 mr-1.5" />
+              Send Template
+            </Button>
+          </div>
+
+          <!-- 24h Window Closed Warning -->
+          <div
+            v-else-if="!isWithin24Hours"
+            class="mb-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-3"
+          >
+            <AlertTriangle class="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-amber-400 light:text-amber-600">24-hour messaging window closed</p>
+              <p class="text-xs text-amber-400/70 light:text-amber-600/70 mt-0.5">
+                You can only send template messages outside the 24-hour window.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              class="bg-amber-500 hover:bg-amber-600 text-white font-medium shrink-0"
+              @click="isTemplateDialogOpen = true"
+            >
+              <Send class="h-3.5 w-3.5 mr-1.5" />
+              Send Template
+            </Button>
+          </div>
+
+          <form v-else @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>
               <TooltipTrigger as-child>
                 <span>
@@ -1954,6 +2036,19 @@ async function sendMediaMessage() {
         </div>
       </DialogContent>
     </Dialog>
+
+    <!-- Template Message Dialog -->
+    <TemplateMessageDialog
+      v-model:open="isTemplateDialogOpen"
+      :contact-id="contactsStore.currentContact?.id ?? ''"
+      :whatsapp-account="(contactsStore.currentContact as any)?.whatsapp_account"
+    />
+    <NewChatDialog
+      :open="isNewChatDialogOpen"
+      @update:open="isNewChatDialogOpen = $event"
+      @chat-created="(id) => selectContact(id)"
+    />
+
   </div>
 </template>
 
