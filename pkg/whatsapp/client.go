@@ -127,10 +127,10 @@ func (c *Client) buildTemplatesURL(account *Account) string {
 
 // MediaURLResponse represents the response from Meta's media endpoint
 type MediaURLResponse struct {
-	URL           string `json:"url"`
-	MimeType      string `json:"mime_type"`
-	SHA256        string `json:"sha256"`
-	FileSize      int64  `json:"file_size"`
+	URL              string `json:"url"`
+	MimeType         string `json:"mime_type"`
+	SHA256           string `json:"sha256"`
+	FileSize         int64  `json:"file_size"`
 	MessagingProduct string `json:"messaging_product"`
 }
 
@@ -488,4 +488,47 @@ func (c *Client) ResumableUpload(ctx context.Context, account *Account, data []b
 
 	c.Log.Info("Resumable upload completed", "handle", finishResp.Handle[:20]+"...")
 	return finishResp.Handle, nil
+}
+
+// BusinessProfileResponse represents the response containing business profile
+type BusinessProfileResponse struct {
+	Data []BusinessProfile `json:"data"`
+}
+
+// GetBusinessProfile retrieves the business profile settings
+func (c *Client) GetBusinessProfile(ctx context.Context, account *Account) (*BusinessProfile, error) {
+	// Requesting specific fields to optimize performance
+	fields := "about,address,description,email,profile_picture_url,websites,vertical,messaging_product"
+	url := fmt.Sprintf("%s/%s/%s/whatsapp_business_profile?fields=%s", c.getBaseURL(), account.APIVersion, account.PhoneID, fields)
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, url, nil, account.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get business profile: %w", err)
+	}
+
+	var response BusinessProfileResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse business profile response: %w", err)
+	}
+
+	if len(response.Data) == 0 {
+		return nil, fmt.Errorf("no business profile found")
+	}
+
+	return &response.Data[0], nil
+}
+
+// UpdateBusinessProfile updates the business profile settings
+func (c *Client) UpdateBusinessProfile(ctx context.Context, account *Account, input BusinessProfileInput) error {
+	url := fmt.Sprintf("%s/%s/%s/whatsapp_business_profile", c.getBaseURL(), account.APIVersion, account.PhoneID)
+
+	// Ensure messaging_product is set
+	input.MessagingProduct = "whatsapp"
+
+	_, err := c.doRequest(ctx, http.MethodPost, url, input, account.AccessToken)
+	if err != nil {
+		return fmt.Errorf("failed to update business profile: %w", err)
+	}
+
+	return nil
 }
