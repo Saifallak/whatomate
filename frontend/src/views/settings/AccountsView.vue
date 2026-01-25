@@ -58,7 +58,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Settings2,
-  TestTube2
+  TestTube2,
+  Store
 } from 'lucide-vue-next'
 
 interface WhatsAppAccount {
