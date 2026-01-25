@@ -1,4 +1,4 @@
-<script setup lang="ts">
+w<script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -82,10 +82,6 @@ interface TestResult {
   verified_name?: string
   quality_rating?: string
   messaging_limit_tier?: string
-  code_verification_status?: string
-  account_mode?: string
-  is_test_number?: boolean
-  warning?: string
 }
 
 import BusinessProfileDialog from './BusinessProfileDialog.vue'
@@ -369,15 +365,10 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
                     <span :class="['px-2 py-0.5 text-xs font-medium rounded-full', getStatusBadgeClass(account.status)]">
                       {{ account.status }}
                     </span>
-                    <!-- Test Number Badge -->
-                    <Badge v-if="testResults[account.id]?.is_test_number" variant="outline" class="border-amber-600 text-amber-600 light:border-amber-500 light:text-amber-700">
-                      <TestTube2 class="h-3 w-3 mr-1" />
-                      Test Number
-                    </Badge>
                   </div>
 
                   <!-- Test Result -->
-                  <div v-if="testResults[account.id]" class="mt-2 space-y-2">
+                  <div v-if="testResults[account.id]" class="mt-2">
                     <div v-if="testResults[account.id].success" class="flex items-center gap-2 text-green-400 light:text-green-600">
                       <CheckCircle2 class="h-4 w-4" />
                       <span class="text-sm font-medium">Connected</span>
@@ -388,11 +379,6 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
                     <div v-else class="flex items-center gap-2 text-red-400 light:text-red-600">
                       <X class="h-4 w-4" />
                       <span class="text-sm">{{ testResults[account.id].error }}</span>
-                    </div>
-                    <!-- Warning Message for Test Numbers -->
-                    <div v-if="testResults[account.id].warning" class="flex items-start gap-2 p-2 rounded-lg bg-amber-950/50 light:bg-amber-50 border border-amber-800 light:border-amber-200">
-                      <AlertCircle class="h-4 w-4 text-amber-400 light:text-amber-600 mt-0.5 flex-shrink-0" />
-                      <span class="text-sm text-amber-300 light:text-amber-700">{{ testResults[account.id].warning }}</span>
                     </div>
                   </div>
 
