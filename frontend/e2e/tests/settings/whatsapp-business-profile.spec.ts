@@ -38,7 +38,7 @@ test.describe('WhatsApp Business Profile', () => {
                 status: 200,
                 contentType: 'application/json',
                 body: JSON.stringify({
-                    data: [{
+                    data: {
                         about: 'Available',
                         address: '123 Test St',
                         description: 'Test Business',
@@ -46,7 +46,7 @@ test.describe('WhatsApp Business Profile', () => {
                         vertical: 'PROF_SERVICES',
                         websites: ['https://example.com'],
                         profile_picture_url: ''
-                    }]
+                    }
                 })
             });
         });
