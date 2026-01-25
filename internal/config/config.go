@@ -11,14 +11,15 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	App      AppConfig      `koanf:"app"`
-	Server   ServerConfig   `koanf:"server"`
-	Database DatabaseConfig `koanf:"database"`
-	Redis    RedisConfig    `koanf:"redis"`
-	JWT      JWTConfig      `koanf:"jwt"`
-	WhatsApp WhatsAppConfig `koanf:"whatsapp"`
-	AI       AIConfig       `koanf:"ai"`
-	Storage  StorageConfig  `koanf:"storage"`
+	App           AppConfig           `koanf:"app"`
+	Server        ServerConfig        `koanf:"server"`
+	Database      DatabaseConfig      `koanf:"database"`
+	Redis         RedisConfig         `koanf:"redis"`
+	JWT           JWTConfig           `koanf:"jwt"`
+	WhatsApp      WhatsAppConfig      `koanf:"whatsapp"`
+	AI            AIConfig            `koanf:"ai"`
+	Storage       StorageConfig       `koanf:"storage"`
+	DefaultAdmin  DefaultAdminConfig  `koanf:"default_admin"`
 }
 
 type AppConfig struct {
@@ -79,6 +80,12 @@ type StorageConfig struct {
 	S3Region  string `koanf:"s3_region"`
 	S3Key     string `koanf:"s3_key"`
 	S3Secret  string `koanf:"s3_secret"`
+}
+
+type DefaultAdminConfig struct {
+	Email    string `koanf:"email"`
+	Password string `koanf:"password"`
+	FullName string `koanf:"full_name"`
 }
 
 // Load loads configuration from file and environment variables
@@ -165,5 +172,15 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Storage.LocalPath == "" {
 		cfg.Storage.LocalPath = "./uploads"
+	}
+	// Default admin credentials (only used during initial setup)
+	if cfg.DefaultAdmin.Email == "" {
+		cfg.DefaultAdmin.Email = "admin@admin.com"
+	}
+	if cfg.DefaultAdmin.Password == "" {
+		cfg.DefaultAdmin.Password = "admin"
+	}
+	if cfg.DefaultAdmin.FullName == "" {
+		cfg.DefaultAdmin.FullName = "Admin"
 	}
 }
