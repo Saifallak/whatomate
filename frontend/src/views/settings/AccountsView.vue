@@ -352,7 +352,7 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
         </Card>
 
         <!-- Account Cards -->
-        <div v-for="account in accounts" :key="account.id" class="card-interactive rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-white light:border-gray-200">
+        <div v-for="account in accounts" :key="account.id" class="account-card card-interactive rounded-xl border border-white/[0.08] bg-white/[0.02] light:bg-white light:border-gray-200">
           <div class="p-6">
             <div class="flex items-start justify-between">
               <div class="flex items-start gap-4">
