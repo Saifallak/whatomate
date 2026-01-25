@@ -212,8 +212,6 @@ func getIndexes() []string {
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
-
-		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
 		// Drop old strictly unique index on phone number (migration)
 		`DROP INDEX IF EXISTS idx_contacts_org_phone`,
 		// Create new scoped unique index including account
