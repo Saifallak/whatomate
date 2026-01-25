@@ -1,3 +1,7 @@
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { api } from '@/services/api'
+import { toast } from 'vue-sonner'
 import {
   Dialog,
   DialogContent,
@@ -18,7 +22,8 @@ import {
   Mail,
   MapPin,
   Image as ImageIcon,
-  AlertTriangle
+  AlertTriangle,
+  Pencil
 } from 'lucide-vue-next'
 import {
   Alert,
@@ -61,10 +66,26 @@ const profile = ref<BusinessProfile>({
 
 // Categories (Verticals) supported by Meta
 const verticals = [
-  'ALCOHOL', 'APPAREL', 'AUTO', 'BEAUTY', 'EDU', 'ENTERTAIN', 'EVENT_PLAN',
-  'FINANCE', 'GOVT', 'GROCERY', 'HEALTH', 'HOTEL', 'NONPROFIT',
-  'ONLINE_GAMBLING', 'OTC_DRUGS', 'OTHER', 'PHYSICAL_GAMBLING',
-  'PROF_SERVICES', 'RETAIL', 'TRAVEL'
+  { value: 'ALCOHOL', label: 'Alcohol' },
+  { value: 'APPAREL', label: 'Apparel' },
+  { value: 'AUTO', label: 'Automotive' },
+  { value: 'BEAUTY', label: 'Beauty & Personal Care' },
+  { value: 'EDU', label: 'Education' },
+  { value: 'ENTERTAIN', label: 'Entertainment' },
+  { value: 'EVENT_PLAN', label: 'Event Planning' },
+  { value: 'FINANCE', label: 'Finance & Banking' },
+  { value: 'GOVT', label: 'Government & Public Service' },
+  { value: 'GROCERY', label: 'Grocery' },
+  { value: 'HEALTH', label: 'Health & Wellness' },
+  { value: 'HOTEL', label: 'Hotel & Lodging' },
+  { value: 'NONPROFIT', label: 'Non-profit' },
+  { value: 'ONLINE_GAMBLING', label: 'Online Gambling' },
+  { value: 'OTC_DRUGS', label: 'Over-the-counter Drugs' },
+  { value: 'OTHER', label: 'Other/Not Listed' },
+  { value: 'PHYSICAL_GAMBLING', label: 'Physical Gambling' },
+  { value: 'PROF_SERVICES', label: 'Professional Services' },
+  { value: 'RETAIL', label: 'Retail' },
+  { value: 'TRAVEL', label: 'Travel & Transportation' }
 ]
 
 watch(() => props.open, async (isOpen) => {
@@ -108,6 +129,7 @@ async function fetchProfile() {
   }
 }
 
+
 async function saveProfile() {
   if (!props.accountId) return
 
@@ -124,7 +146,6 @@ async function saveProfile() {
       email: profile.value.email,
       websites: websites,
       about: profile.value.about
-      // Note: profile_picture_handle is handled separately effectively by the user having to upload first (not implemented in this specific form yet)
     }
 
     await api.put(`/accounts/${props.accountId}/business_profile`, payload)
@@ -136,6 +157,53 @@ async function saveProfile() {
     toast.error(message)
   } finally {
     isSubmitting.value = false
+  }
+}
+
+const fileInput = ref<HTMLInputElement | null>(null)
+const isUploading = ref(false)
+
+function triggerFileInput() {
+  fileInput.value?.click()
+}
+
+async function handleFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (!input.files || input.files.length === 0) return
+
+  const file = input.files[0]
+  // Validate basic type
+  if (!file.type.startsWith('image/')) {
+    toast.error('Please select an image file (JPEG, PNG)')
+    return
+  }
+  
+  // Validate size (Meta limit is usually 5MB for profile generic, strict on square)
+  if (file.size > 5 * 1024 * 1024) {
+    toast.error('Image must be less than 5MB')
+    return
+  }
+
+  isUploading.value = true
+  const formData = new FormData()
+  formData.append('file', file)
+
+  try {
+    await api.post(`/accounts/${props.accountId}/business_profile/photo`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    toast.success('Profile picture updated successfully')
+    // Refresh
+    await fetchProfile()
+  } catch (error: any) {
+    console.error('Failed to upload photo:', error)
+    toast.error(error.response?.data?.message || 'Failed to update profile picture')
+  } finally {
+    isUploading.value = false
+    // Reset input
+    if (fileInput.value) fileInput.value.value = ''
   }
 }
 </script>
@@ -171,15 +239,36 @@ async function saveProfile() {
         <div class="grid gap-6 md:grid-cols-2">
            <!-- Profile Picture Preview -->
            <div class="md:col-span-2 flex items-center gap-4">
-              <div class="h-20 w-20 rounded-full bg-secondary flex items-center justify-center overflow-hidden border border-border">
+              <div 
+                class="group relative h-24 w-24 rounded-full bg-secondary flex items-center justify-center overflow-hidden border border-border cursor-pointer transition-all hover:ring-2 hover:ring-emerald-500 hover:ring-offset-2 hover:ring-offset-background"
+                @click="triggerFileInput"
+              >
+                <!-- Loading Overlay -->
+                <div v-if="isUploading" class="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
+                  <Loader2 class="h-6 w-6 text-white animate-spin" />
+                </div>
+                
+                <!-- Hover Overlay -->
+                <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10" v-if="!isUploading">
+                  <Pencil class="h-6 w-6 text-white" />
+                </div>
+
                 <img v-if="profile.profile_picture_url" :src="profile.profile_picture_url" alt="Profile" class="h-full w-full object-cover" />
-                <ImageIcon v-else class="h-8 w-8 text-muted-foreground" />
+                <ImageIcon v-else class="h-10 w-10 text-muted-foreground" />
+                
+                <input
+                  ref="fileInput"
+                  type="file"
+                  accept="image/png, image/jpeg"
+                  class="hidden"
+                  @change="handleFileChange"
+                />
               </div>
-              <div>
+              <div class="flex-1">
                 <Label>Profile Picture</Label>
                 <p class="text-xs text-muted-foreground mt-1">
-                  Profile picture updates require a simpler media upload flow. 
-                  <br/>Currently, this can be updated via the Meta Business Manager directly.
+                  Click to upload a new picture.
+                  <br/>Recommended: Square JPG or PNG, max 5MB.
                 </p>
               </div>
            </div>
@@ -187,14 +276,14 @@ async function saveProfile() {
            <!-- About -->
            <div class="md:col-span-2 space-y-2">
             <Label for="about">About (Status)</Label>
-            <Input id="about" v-model="profile.about" placeholder="e.g., Available, Busy, At work" :maxlength="139" />
+            <Input id="about" v-model="profile.about" placeholder="e.g., Available, Busy, At work" maxlength="139" />
             <p class="text-xs text-muted-foreground text-right">{{ profile.about.length }}/139</p>
           </div>
 
           <!-- Description -->
           <div class="md:col-span-2 space-y-2">
             <Label for="description">Business Description</Label>
-            <Textarea id="description" v-model="profile.description" placeholder="Describe your business..." rows="3" :maxlength="512" />
+            <Textarea id="description" v-model="profile.description" placeholder="Describe your business..." rows="3" maxlength="512" />
             <p class="text-xs text-muted-foreground text-right">{{ profile.description.length }}/512</p>
           </div>
 
@@ -207,7 +296,7 @@ async function saveProfile() {
               class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value="" disabled>Select a category</option>
-              <option v-for="v in verticals" :key="v" :value="v">{{ v }}</option>
+              <option v-for="v in verticals" :key="v.value" :value="v.value">{{ v.label }}</option>
             </select>
           </div>
 
@@ -216,7 +305,7 @@ async function saveProfile() {
             <Label for="email">Contact Email</Label>
             <div class="relative">
               <Mail class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input id="email" v-model="profile.email" type="email" class="pl-9" placeholder="contact@example.com" :maxlength="128" />
+              <Input id="email" v-model="profile.email" type="email" class="pl-9" placeholder="contact@example.com" maxlength="128" />
             </div>
           </div>
 
@@ -225,7 +314,7 @@ async function saveProfile() {
             <Label for="address">Business Address</Label>
             <div class="relative">
               <MapPin class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input id="address" v-model="profile.address" class="pl-9" placeholder="Street, City, State, Zip" :maxlength="256" />
+              <Input id="address" v-model="profile.address" class="pl-9" placeholder="Street, City, State, Zip" maxlength="256" />
             </div>
           </div>
 
@@ -234,7 +323,7 @@ async function saveProfile() {
              <Label>Websites (Max 2)</Label>
              <div v-for="(_, index) in profile.websites" :key="index" class="relative">
                <Globe class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-               <Input v-model="profile.websites[index]" class="pl-9" placeholder="https://www.example.com" :maxlength="256" />
+               <Input v-model="profile.websites[index]" class="pl-9" placeholder="https://www.example.com" maxlength="256" />
              </div>
           </div>
         </div>
