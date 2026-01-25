@@ -114,7 +114,7 @@ func AutoMigrate(db *gorm.DB) error {
 }
 
 // RunMigrationWithProgress runs migrations with a progress bar display
-func RunMigrationWithProgress(db *gorm.DB) error {
+func RunMigrationWithProgress(db *gorm.DB, adminCfg *config.DefaultAdminConfig) error {
 	// Silence GORM logging during migration
 	silentDB := db.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)})
 
@@ -173,7 +173,7 @@ func RunMigrationWithProgress(db *gorm.DB) error {
 
 	// Create default admin (only runs if no users exist)
 	printProgress(currentStep, totalSteps)
-	if err := CreateDefaultAdmin(silentDB); err != nil {
+	if err := CreateDefaultAdmin(silentDB, adminCfg); err != nil {
 		fmt.Printf("\n  \033[31m✗ Setup failed\033[0m\n\n")
 		return err
 	}
@@ -326,10 +326,10 @@ func CreateIndexes(db *gorm.DB) error {
 
 // CreateDefaultAdmin creates a default admin user if no users exist
 // This should only be called once during initial setup
-func CreateDefaultAdmin(db *gorm.DB) error {
-	// Check if admin@admin.com already exists
+func CreateDefaultAdmin(db *gorm.DB, cfg *config.DefaultAdminConfig) error {
+	// Check if admin already exists (using email from config)
 	var existingAdmin models.User
-	if err := db.Where("email = ?", "admin@admin.com").First(&existingAdmin).Error; err == nil {
+	if err := db.Where("email = ?", cfg.Email).First(&existingAdmin).Error; err == nil {
 		// Admin already exists, skip
 		return nil
 	}
@@ -348,8 +348,8 @@ func CreateDefaultAdmin(db *gorm.DB) error {
 		}
 	}
 
-	// Hash the default password
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	// Hash the default password from config
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(cfg.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
@@ -374,9 +374,9 @@ func CreateDefaultAdmin(db *gorm.DB) error {
 	admin := models.User{
 		BaseModel:      models.BaseModel{ID: uuid.New()},
 		OrganizationID: org.ID,
-		Email:          "admin@admin.com",
+		Email:          cfg.Email,
 		PasswordHash:   string(passwordHash),
-		FullName:       "Admin",
+		FullName:       cfg.FullName,
 		RoleID:         &adminRole.ID,
 		IsActive:       true,
 		IsAvailable:    true,
