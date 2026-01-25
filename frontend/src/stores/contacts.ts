@@ -1,6 +1,6 @@
-import {defineStore} from 'pinia'
-import {computed, ref} from 'vue'
-import {contactsService, messagesService} from '@/services/api'
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import { contactsService, messagesService } from '@/services/api'
 
 export interface Contact {
   id: string
@@ -226,11 +226,12 @@ export const useContactsStore = defineStore('contacts', () => {
     replyingTo.value = null
   }
 
-  async function sendTemplate(contactId: string, templateName: string, templateParams?: Record<string, string>) {
+  async function sendTemplate(contactId: string, templateName: string, templateParams?: Record<string, string>, accountName?: string) {
     try {
       const response = await messagesService.sendTemplate(contactId, {
         template_name: templateName,
-        template_params: templateParams
+        template_params: templateParams,
+        account_name: accountName
       })
       // API returns {message_id, status, template_name, phone_number}
       // The full message will be broadcast via WebSocket, so don't add partial data

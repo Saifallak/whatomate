@@ -153,7 +153,8 @@ async function sendTemplate() {
     await contactsStore.sendTemplate(
       props.contactId,
       selectedTemplate.value.name,
-      templateParams
+      templateParams,
+      props.whatsappAccount
     )
     
     toast.success('Template sent successfully')
