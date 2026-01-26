@@ -80,6 +80,7 @@ interface WhatsAppAccount {
   display_name?: string
   created_at: string
   updated_at: string
+  pin?: string
 }
 
 interface TestResult {
@@ -116,6 +117,218 @@ const profileAccount = ref<WhatsAppAccount | null>(null)
 function openProfileDialog(account: WhatsAppAccount) {
   profileAccount.value = account
   isProfileDialogOpen.value = true
+}
+
+// Facebook SDK
+declare global {
+  interface Window {
+    FB: any
+    fbAsyncInit: () => void
+  }
+}
+
+// Load Facebook SDK
+const loadFacebookSDK = () => {
+  return new Promise<void>((resolve) => {
+    if (window.FB) {
+      resolve()
+      return
+    }
+
+    window.fbAsyncInit = function() {
+      // Config ID for "WhatsApp Embedded Signup"
+      // You should replace 'YOUR_CONFIG_ID' with the actual configuration ID you created in Meta Business Manager
+      // If config_id is dynamic, fetch it from backend. For now we assume env or hardcoded.
+      // Since we don't have the config ID yet, we'll try to find it or ask user.
+      // NOTE: The user needs to provide: App ID, Config ID.
+      // We will init with App ID.
+      // For now, we'll assume a placeholder or env var if available.
+      // Let's rely on the button click to trigger login with config_id.
+    }
+
+    const script = document.createElement('script')
+    script.src = 'https://connect.facebook.net/en_US/sdk.js'
+    script.async = true
+    script.defer = true
+    script.onload = () => resolve()
+    document.body.appendChild(script)
+  })
+}
+
+const initFacebook = async () => {
+  await loadFacebookSDK()
+
+  const checkFB = setInterval(() => {
+    if (window.FB) {
+      clearInterval(checkFB)
+      const appId = import.meta.env.VITE_WHATSAPP_APP_ID || ''
+
+      window.FB.init({
+        appId            : appId,
+        autoLogAppEvents : true,
+        xfbml            : true,
+        version          : 'v21.0'
+      })
+    }
+  }, 100)
+}
+
+onMounted(async () => {
+  await fetchAccounts()
+  await initFacebook()
+})
+
+async function launchWhatsAppSignup() {
+  if (!window.FB) {
+    toast.error('Facebook SDK not loaded')
+    return
+  }
+
+  // The Config ID for the Embedded Signup flow
+  const configId = import.meta.env.VITE_WHATSAPP_CONFIG_ID || ''
+
+  if (!configId) {
+    toast.error('WhatsApp Configuration ID is missing in environment variables')
+    return
+  }
+
+  window.FB.login(async (response: any) => {
+    if (response.authResponse) {
+      const { accessToken, userID, code } = response.authResponse
+
+      // If we used "response_type: 'code'", we get a code.
+      // For embedded signup, usually we get a code to exchange.
+      if (code) {
+        await exchangeCodeForToken(code)
+      } else {
+        // Sometimes it returns accessToken directly if configured that way,
+        // but for system user token exchange we usually want code.
+        // Let's assume we get a code.
+        toast.error('No code received from Facebook')
+      }
+    }
+  }, {
+    config_id: configId,
+    response_type: 'code',
+    override_default_response_type: true,
+    extras: {
+      sessionInfoVersion: 2,
+    }
+  })
+}
+
+async function exchangeCodeForToken(code: string) {
+  // Wait a moment for the message event to populate pendingSignupData
+  // because the message event might fire slightly after or before the callback
+
+  let attempts = 0
+  const maxAttempts = 20 // 2 seconds timeout
+
+  const checkData = setInterval(async () => {
+    attempts++
+    if (pendingSignupData.value) {
+      clearInterval(checkData)
+      await finishSignup(code)
+    } else if (attempts >= maxAttempts) {
+      clearInterval(checkData)
+      // Fallback: If we don't get the message event data (e.g. strict privacy settings or different flow),
+      // we can't proceed with the current backend requirement (requiring phone_id).
+      // We'll show an error or try to ask the user?
+      // For now, let's treat it as an error.
+      toast.error('Could not retrieve signup details. Please try again.')
+    }
+  }, 100)
+}
+
+// Global listener for the embedded signup response data
+window.addEventListener('message', (event) => {
+  if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") {
+    return;
+  }
+
+  try {
+    const data = JSON.parse(event.data);
+    if (data.type === 'WA_EMBEDDED_SIGNUP') {
+      // status: 'connected', event: 'sessionInfo', data: { waba_id, phone_number_id, ... }
+      if (data.event === 'FINISH' && data.data) {
+        const { phone_number_id, waba_id } = data.data;
+        pendingSignupData.value = { phone_number_id, waba_id };
+      }
+    }
+  } catch (e) {
+    // ignore non-json
+  }
+});
+
+const pendingSignupData = ref<{phone_number_id: string, waba_id: string} | null>(null)
+
+// Updated exchange function
+const needsPin = ref(false)
+const userPin = ref('')
+const registeringAccountId = ref<string | null>(null)
+
+async function finishSignup(code: string) {
+  if (!pendingSignupData.value) {
+    toast.error('Missing signup data (phone ID). Please try again.')
+    return
+  }
+
+  try {
+    isLoading.value = true
+    const payload = {
+      code: code,
+      phone_id: pendingSignupData.value.phone_number_id,
+      waba_id: pendingSignupData.value.waba_id,
+      name: 'New WhatsApp Account', // User can rename later
+    }
+
+    const response = await api.post('/accounts/exchange-token', payload)
+    toast.success('WhatsApp account connected successfully!')
+
+    // Auto-register phone (Two-Step Verification)
+    if (response.data.data?.id) {
+      await registerPhone(response.data.data.id)
+    }
+
+    await fetchAccounts()
+  } catch (error: any) {
+    toast.error(error.response?.data?.message || 'Failed to connect account')
+  } finally {
+    isLoading.value = false
+    pendingSignupData.value = null
+  }
+}
+
+async function registerPhone(accountId: string, pin?: string) {
+  try {
+    const payload = pin ? { pin } : {}
+    const response = await api.post(`/accounts/${accountId}/register`, payload)
+
+    if (response.data.data?.success) {
+       toast.success('Phone number registered for WhatsApp API!')
+       needsPin.value = false
+       userPin.value = ''
+       registeringAccountId.value = null
+       await fetchAccounts()
+    } else {
+       // Should be caught by catch block if status != 200,
+       // but if backend returns 200 with success=false (custom envelope), check here.
+       throw new Error(response.data.data?.error || 'Registration failed')
+    }
+  } catch (error: any) {
+     console.error('Registration error:', error)
+     // If error indicates PIN issue (user needs to enter existing PIN)
+     // We assume any error here *might* be PIN related if it's "MessagingVerificationCodeMismatch" or similar.
+     // For simplicity, we'll prompt user for PIN on failure.
+
+     if (!pin) { // Only prompt if we haven't manually tried a PIN yet (i.e., failed on auto-gen)
+         needsPin.value = true
+         registeringAccountId.value = accountId
+         toast.warning('This number is already protected by a PIN. Please enter it to continue.')
+     } else {
+         toast.error('Registration failed. Please verify your PIN and try again.')
+     }
+  }
 }
 
 const formData = ref({
@@ -281,6 +494,8 @@ function getStatusBadgeClass(status: string) {
   switch (status) {
     case 'active':
       return 'bg-green-900 text-green-300 light:bg-green-100 light:text-green-800'
+    case 'pending_registration':
+      return 'bg-yellow-900 text-yellow-300 light:bg-yellow-100 light:text-yellow-800'
     case 'inactive':
       return 'bg-gray-800 text-gray-300 light:bg-gray-100 light:text-gray-800'
     case 'error':
@@ -406,6 +621,10 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
                       <TestTube2 class="h-3 w-3 mr-1" />
                       Test Number
                     </Badge>
+                    <span v-if="account.status === 'pending_registration'" class="text-xs text-yellow-500 flex items-center gap-1">
+                       <AlertCircle class="h-3 w-3" /> Needs Registration
+                       <Button variant="link" size="sm" class="h-auto p-0 text-yellow-400" @click="registerPhone(account.id)">Retry</Button>
+                    </span>
                   </div>
 
                   <!-- Test Result -->
