@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nyaruka/phonenumbers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -113,6 +114,8 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 
 	// Strict filters
 	if phoneNumber != "" {
+		// Strip + if present
+		phoneNumber = strings.TrimPrefix(phoneNumber, "+")
 		query = query.Where("phone_number = ?", phoneNumber)
 	}
 	if whatsappAccount != "" {
@@ -1191,6 +1194,27 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 	if req.PhoneNumber == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Phone number is required", nil, "")
 	}
+
+	// Validate phone number
+	// Use Parse with empty region, assuming international format or prepended +
+	numToParse := req.PhoneNumber
+	if !strings.HasPrefix(numToParse, "+") {
+		numToParse = "+" + numToParse
+	}
+
+	num, err := phonenumbers.Parse(numToParse, "")
+	if err != nil {
+		a.Log.Warn("Failed to parse phone number", "phone", req.PhoneNumber, "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid phone number format", nil, "")
+	}
+
+	if !phonenumbers.IsValidNumber(num) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid phone number", nil, "")
+	}
+
+	// Format to E.164 for storage consistency, then strip the +
+	e164 := phonenumbers.Format(num, phonenumbers.E164)
+	req.PhoneNumber = strings.TrimPrefix(e164, "+")
 
 	if req.WhatsAppAccount == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account is required", nil, "")

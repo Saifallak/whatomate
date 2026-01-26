@@ -22,6 +22,7 @@ import { Loader2 } from 'lucide-vue-next'
 import { contactsService, templatesService, accountsService, messagesService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { useContactsStore } from '@/stores/contacts'
+import { isValidPhoneNumber } from 'libphonenumber-js'
 
 const props = defineProps<{
   open: boolean
@@ -114,7 +115,7 @@ const duplicateWarning = ref<string | null>(null)
 let checkTimeout: any = null
 
 const checkExistingContacts = async (phone: string) => {
-    if (!phone || phone.length < 5) { // Allow check for shorter strings for search-as-you-type
+    if (!phone || !isValidPhoneNumber(phone)) {
         duplicateWarning.value = null
         return
     }
@@ -127,14 +128,14 @@ const checkExistingContacts = async (phone: string) => {
         const currentAccountName = account?.name
         
         // Filter to ensure we are matching phone number (search also checks name)
-        // and allow partial matches for "search-as-you-type" warning
-        // but prioritize exact match if available
-        const matchingContacts = contacts.filter((c: any) => c.phone_number.includes(phone))
+        const matchingContact = contacts.find((c: any) => c.phone_number && c.phone_number.includes(phone))
         
-        const otherAccountContact = matchingContacts.find((c: any) => c.whatsapp_account !== currentAccountName)
-        
-        if (otherAccountContact) {
-            duplicateWarning.value = `Contact "${otherAccountContact.name || otherAccountContact.phone_number}" already exists on account "${otherAccountContact.whatsapp_account}".`
+        if (matchingContact) {
+            if (matchingContact.whatsapp_account === currentAccountName) {
+                duplicateWarning.value = "Current account has already chatted with this contact."
+            } else {
+                 duplicateWarning.value = `Account "${matchingContact.whatsapp_account}" has already chatted with this contact.`
+            }
         } else {
             duplicateWarning.value = null
         }
@@ -153,6 +154,11 @@ watch(phoneNumber, (newVal) => {
 
 async function handleSubmit() {
   if (!phoneNumber.value || !selectedTemplate.value || !selectedAccount.value) return
+
+  if (!isValidPhoneNumber(phoneNumber.value)) {
+      toast.error('Invalid phone number')
+      return
+  }
 
   isSubmitting.value = true
   try {
