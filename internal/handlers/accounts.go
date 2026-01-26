@@ -442,10 +442,10 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
 
-	// Check if we need to return specific error code to frontend to trigger PIN dialog immediately?
-	// We update the response to include a flag maybe?
-	// If pending, frontend knows to ask for PIN or show "Needs Registration"
-	return r.SendEnvelope(accountToResponse(account))
+	// Return response
+	// If status is pending_registration, frontend will handle the PIN prompt
+	accResp := accountToResponse(account)
+	return r.SendEnvelope(accResp)
 }
 
 // Helper to perform the actual registration call

@@ -305,6 +305,7 @@ async function registerPhone(accountId: string, pin?: string) {
      // For simplicity, we'll prompt user for PIN on failure.
      
      if (!pin) { // Only prompt if we haven't manually tried a PIN yet (i.e., failed on auto-gen)
+         console.log('Opening PIN dialog for account:', accountId) // Debug log
          needsPin.value = true
          registeringAccountId.value = accountId
          toast.warning('This number is already protected by a PIN. Please enter it to continue.')
@@ -444,6 +445,12 @@ async function confirmDelete() {
   } catch (error: any) {
     const message = error.response?.data?.message || 'Failed to delete account'
     toast.error(message)
+  }
+}
+
+function handlePinSubmit() {
+  if (registeringAccountId.value && userPin.value) {
+     registerPhone(registeringAccountId.value, userPin.value)
   }
 }
 
@@ -933,6 +940,16 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
           <AlertDialogDescription>
             Are you sure you want to delete "{{ accountToDelete?.name }}"? This action cannot be undone.
           </AlertDialogDescription>
+          <!-- Warning for PIN -->
+          <div v-if="accountToDelete?.pin" class="mt-4 p-3 bg-red-950/30 border border-red-900 rounded-lg">
+             <p class="text-sm text-red-400 font-medium mb-1">Warning: 2FA PIN Registered</p>
+             <p class="text-xs text-red-300">
+               This account has a registered 2FA PIN: <code class="bg-black/30 px-1 rounded text-white">{{ accountToDelete.pin }}</code>
+             </p>
+             <p class="text-xs text-red-300 mt-1">
+               Please save this PIN. You will need it if you want to register this phone number with another WhatsApp provider.
+             </p>
+          </div>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -942,5 +959,34 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <!-- PIN Input Dialog for Retry -->
+    <Dialog v-model:open="needsPin">
+      <DialogContent class="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Enter Two-Step Verification PIN</DialogTitle>
+          <DialogDescription>
+            This phone number is already registered with a PIN. Please enter it to verify ownership.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div class="space-y-4 py-4">
+           <div class="space-y-2">
+             <Label for="pin">6-Digit PIN</Label>
+             <Input id="pin" v-model="userPin" placeholder="000000" maxlength="6" pattern="\d*" />
+             <p class="text-xs text-muted-foreground">
+               Forgot your PIN? <a href="https://business.facebook.com/wa/manage/phone-numbers/" target="_blank" class="text-primary hover:underline">Reset it in WhatsApp Manager</a>.
+             </p>
+           </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="needsPin = false">Cancel</Button>
+          <Button @click="handlePinSubmit" :disabled="!userPin || userPin.length < 6">
+             Register
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
