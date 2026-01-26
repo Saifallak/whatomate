@@ -175,19 +175,19 @@ async function launchWhatsAppSignup() {
     return
   }
 
-  window.FB.login(async (response: any) => {
+  window.FB.login((response: any) => {
     if (response.authResponse) {
-      const { accessToken, userID, code } = response.authResponse
+      const { code } = response.authResponse
 
       // If we used "response_type: 'code'", we get a code.
       // For embedded signup, usually we get a code to exchange.
       if (code) {
-        await exchangeCodeForToken(code)
+        exchangeCodeForToken(code).catch(err => console.error(err))
       } else {
-         // Sometimes it returns accessToken directly if configured that way,
-         // but for system user token exchange we usually want code.
-         // Let's assume we get a code.
-         toast.error('No code received from Facebook')
+        // Sometimes it returns accessToken directly if configured that way,
+        // but for system user token exchange we usually want code.
+        // Let's assume we get a code.
+        toast.error('No code received from Facebook')
       }
     }
   }, {
