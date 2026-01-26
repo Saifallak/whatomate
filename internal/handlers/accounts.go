@@ -326,6 +326,104 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 	})
 }
 
+// ExchangeToken exchanges the temporary code for a permanent access token and creates the account
+func (a *App) ExchangeToken(r *fastglue.Request) error {
+	orgID, err := getOrganizationID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	var req struct {
+		Code               string `json:"code" validate:"required"`
+		SetupToken         string `json:"setup_token"` // Optional
+		PhoneID            string `json:"phone_id" validate:"required"`
+		WABAID             string `json:"waba_id" validate:"required"`
+		Name               string `json:"name"`
+		WebhookVerifyToken string `json:"webhook_verify_token"`
+	}
+	if err := r.Decode(&req, "json"); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+
+	if req.Code == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Code is required", nil, "")
+	}
+
+	// 1. Exchange code for user access token
+	url := fmt.Sprintf("%s/%s/oauth/access_token?client_id=%s&client_secret=%s&code=%s",
+		a.Config.WhatsApp.BaseURL, a.Config.WhatsApp.APIVersion,
+		a.Config.WhatsApp.AppID, a.Config.WhatsApp.AppSecret, req.Code)
+
+	resp, err := a.HTTPClient.Get(url)
+	if err != nil {
+		a.Log.Error("Failed to exchange token", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to exchange token", nil, "")
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		a.Log.Error("Token exchange failed", "status", resp.Status, "body", string(body))
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Token exchange failed", nil, "")
+	}
+
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to parse token response", nil, "")
+	}
+
+	// 2. We can now create/update the account
+	// Check if account already exists
+	var account models.WhatsAppAccount
+	var existingAccount bool
+	if err := a.DB.Where("phone_id = ? AND organization_id = ?", req.PhoneID, orgID).First(&account).Error; err == nil {
+		existingAccount = true
+	}
+
+	if req.Name == "" {
+		req.Name = "WhatsApp Account " + req.PhoneID[len(req.PhoneID)-4:]
+	}
+
+	// Generate verify token if needed
+	if req.WebhookVerifyToken == "" {
+		if existingAccount {
+			req.WebhookVerifyToken = account.WebhookVerifyToken
+		} else {
+			req.WebhookVerifyToken = generateVerifyToken()
+		}
+	}
+
+	account.OrganizationID = orgID
+	account.Name = req.Name
+	account.AppID = a.Config.WhatsApp.AppID
+	account.PhoneID = req.PhoneID
+	account.BusinessID = req.WABAID
+	account.AccessToken = tokenResp.AccessToken
+	account.AppSecret = a.Config.WhatsApp.AppSecret
+	account.WebhookVerifyToken = req.WebhookVerifyToken
+	account.APIVersion = a.Config.WhatsApp.APIVersion
+	account.Status = "active"
+
+	if !existingAccount {
+		// defaults
+		account.IsDefaultIncoming = false
+		account.IsDefaultOutgoing = false
+		account.AutoReadReceipt = false
+	}
+
+	if err := a.DB.Save(&account).Error; err != nil {
+		a.Log.Error("Failed to save account", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account", nil, "")
+	}
+
+	// Invalidate cache
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+
+	return r.SendEnvelope(accountToResponse(account))
+}
+
 // Helper functions
 
 func accountToResponse(acc models.WhatsAppAccount) AccountResponse {

@@ -11,15 +11,15 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	App           AppConfig           `koanf:"app"`
-	Server        ServerConfig        `koanf:"server"`
-	Database      DatabaseConfig      `koanf:"database"`
-	Redis         RedisConfig         `koanf:"redis"`
-	JWT           JWTConfig           `koanf:"jwt"`
-	WhatsApp      WhatsAppConfig      `koanf:"whatsapp"`
-	AI            AIConfig            `koanf:"ai"`
-	Storage       StorageConfig       `koanf:"storage"`
-	DefaultAdmin  DefaultAdminConfig  `koanf:"default_admin"`
+	App          AppConfig          `koanf:"app"`
+	Server       ServerConfig       `koanf:"server"`
+	Database     DatabaseConfig     `koanf:"database"`
+	Redis        RedisConfig        `koanf:"redis"`
+	JWT          JWTConfig          `koanf:"jwt"`
+	WhatsApp     WhatsAppConfig     `koanf:"whatsapp"`
+	AI           AIConfig           `koanf:"ai"`
+	Storage      StorageConfig      `koanf:"storage"`
+	DefaultAdmin DefaultAdminConfig `koanf:"default_admin"`
 }
 
 type AppConfig struct {
@@ -56,15 +56,17 @@ type RedisConfig struct {
 }
 
 type JWTConfig struct {
-	Secret           string `koanf:"secret"`
-	AccessExpiryMins int    `koanf:"access_expiry_mins"`
-	RefreshExpiryDays int   `koanf:"refresh_expiry_days"`
+	Secret            string `koanf:"secret"`
+	AccessExpiryMins  int    `koanf:"access_expiry_mins"`
+	RefreshExpiryDays int    `koanf:"refresh_expiry_days"`
 }
 
 type WhatsAppConfig struct {
 	WebhookVerifyToken string `koanf:"webhook_verify_token"`
 	APIVersion         string `koanf:"api_version"`
 	BaseURL            string `koanf:"base_url"` // Meta Graph API base URL
+	AppID              string `koanf:"app_id"`
+	AppSecret          string `koanf:"app_secret"`
 }
 
 type AIConfig struct {

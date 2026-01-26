@@ -101,6 +101,184 @@ const testResults = ref<Record<string, TestResult>>({})
 const deleteDialogOpen = ref(false)
 const accountToDelete = ref<WhatsAppAccount | null>(null)
 
+// Facebook SDK
+declare global {
+  interface Window {
+    FB: any
+    fbAsyncInit: () => void
+  }
+}
+
+// Load Facebook SDK
+const loadFacebookSDK = () => {
+  return new Promise<void>((resolve) => {
+    if (window.FB) {
+      resolve()
+      return
+    }
+
+    window.fbAsyncInit = function() {
+      // Config ID for "WhatsApp Embedded Signup"
+      // You should replace 'YOUR_CONFIG_ID' with the actual configuration ID you created in Meta Business Manager
+      // If config_id is dynamic, fetch it from backend. For now we assume env or hardcoded.
+      // Since we don't have the config ID yet, we'll try to find it or ask user.
+      // NOTE: The user needs to provide: App ID, Config ID.
+      // We will init with App ID.
+      // For now, we'll assume a placeholder or env var if available.
+      // Let's rely on the button click to trigger login with config_id.
+    }
+
+    const script = document.createElement('script')
+    script.src = 'https://connect.facebook.net/en_US/sdk.js'
+    script.async = true
+    script.defer = true
+    script.onload = () => resolve()
+    document.body.appendChild(script)
+  })
+}
+
+const initFacebook = async () => {
+  await loadFacebookSDK()
+  
+  // We need the App ID from backend ideally, or env.
+  // Assuming 123456789 for now, should be replaced by real ID
+  // Wait for SDK to be ready
+  const checkFB = setInterval(() => {
+    if (window.FB) {
+      clearInterval(checkFB)
+      window.FB.init({
+        appId            : import.meta.env.VITE_WHATSAPP_APP_ID || '', // Needs to be in .env
+        autoLogAppEvents : true,
+        xfbml            : true,
+        version          : 'v21.0'
+      })
+    }
+  }, 100)
+}
+
+onMounted(async () => {
+  await fetchAccounts()
+  await initFacebook()
+})
+
+async function launchWhatsAppSignup() {
+  if (!window.FB) {
+    toast.error('Facebook SDK not loaded')
+    return
+  }
+
+  // The Config ID for the Embedded Signup flow
+  const configId = import.meta.env.VITE_WHATSAPP_CONFIG_ID || '' 
+
+  if (!configId) {
+    toast.error('WhatsApp Configuration ID is missing in environment variables')
+    return
+  }
+
+  window.FB.login(async (response: any) => {
+    if (response.authResponse) {
+      const { accessToken, userID, code } = response.authResponse
+      
+      // If we used "response_type: 'code'", we get a code.
+      // For embedded signup, usually we get a code to exchange.
+      if (code) {
+        await exchangeCodeForToken(code)
+      } else {
+         // Sometimes it returns accessToken directly if configured that way, 
+         // but for system user token exchange we usually want code.
+         // Let's assume we get a code.
+         toast.error('No code received from Facebook')
+      }
+    } else {
+      console.log('User cancelled login or did not fully authorize.')
+    }
+  }, {
+    config_id: configId,
+    response_type: 'code',
+    override_default_response_type: true, 
+    extras: {
+      sessionInfoVersion: 2,
+    }
+  })
+}
+
+async function exchangeCodeForToken(code: string) {
+  // Wait a moment for the message event to populate pendingSignupData
+  // because the message event might fire slightly after or before the callback
+  
+  let attempts = 0
+  const maxAttempts = 20 // 2 seconds timeout
+  
+  const checkData = setInterval(async () => {
+    attempts++
+    if (pendingSignupData.value) {
+      clearInterval(checkData)
+      await finishSignup(code)
+    } else if (attempts >= maxAttempts) {
+      clearInterval(checkData)
+       // Fallback: If we don't get the message event data (e.g. strict privacy settings or different flow),
+       // we can't proceed with the current backend requirement (requiring phone_id).
+       // We'll show an error or try to ask the user?
+       // For now, let's treat it as an error.
+       toast.error('Could not retrieve signup details. Please try again.')
+    }
+  }, 100)
+}
+
+// Global listener for the embedded signup response data
+window.addEventListener('message', (event) => {
+   if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") {
+     return;
+   }
+   
+   try {
+     const data = JSON.parse(event.data);
+     if (data.type === 'WA_EMBEDDED_SIGNUP') {
+        // status: 'connected', event: 'sessionInfo', data: { waba_id, phone_number_id, ... }
+        if (data.event === 'FINISH' && data.data) {
+           const { phone_number_id, waba_id } = data.data;
+           pendingSignupData.value = { phone_number_id, waba_id };
+        }
+     }
+   } catch (e) {
+     // ignore non-json
+   }
+});
+
+const pendingSignupData = ref<{phone_number_id: string, waba_id: string} | null>(null)
+
+// Updated exchange function
+async function finishSignup(code: string) {
+    if (!pendingSignupData.value) {
+       // It's possible we have the code but not the event data yet? or vice versa?
+       // Usually the event fires, then we close the window/popup?
+       // Actually FB.login popup handles itself.
+       // Let's optimistically hope we have the data or wait for it.
+       // For now, let's just error if missing.
+       toast.error('Missing signup data (phone ID). Please try again.')
+       return
+    }
+
+    try {
+        isLoading.value = true
+        const payload = {
+            code: code,
+            phone_id: pendingSignupData.value.phone_number_id,
+            waba_id: pendingSignupData.value.waba_id,
+            name: 'New WhatsApp Account', // User can rename later
+        }
+        
+        await api.post('/accounts/exchange-token', payload)
+        toast.success('WhatsApp account connected successfully!')
+        await fetchAccounts()
+    } catch (error: any) {
+        toast.error(error.response?.data?.message || 'Failed to connect account')
+    } finally {
+        isLoading.value = false
+        pendingSignupData.value = null
+    }
+}
+
 const formData = ref({
   name: '',
   app_id: '',
@@ -304,10 +482,16 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
             </BreadcrumbList>
           </Breadcrumb>
         </div>
-        <Button variant="outline" size="sm" @click="openCreateDialog">
-          <Plus class="h-4 w-4 mr-2" />
-          Add Account
-        </Button>
+        <div class="flex gap-2">
+          <Button variant="default" size="sm" @click="launchWhatsAppSignup">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/6/6c/Facebook_Logo_2023.png" class="h-4 w-4 mr-2 bg-white rounded-full" alt="Facebook" />
+            Connect with WhatsApp
+          </Button>
+          <Button variant="outline" size="sm" @click="openCreateDialog">
+            <Plus class="h-4 w-4 mr-2" />
+            Manual Entry
+          </Button>
+        </div>
       </div>
     </header>
 

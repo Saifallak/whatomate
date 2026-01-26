@@ -46,6 +46,18 @@ s3_region = ""
 s3_key = ""
 s3_secret = ""
 
+[whatsapp]
+webhook_verify_token = "random-string-change-this"
+api_version = "v21.0"
+base_url = "https://graph.facebook.com"
+app_id = ""      # Meta App ID for Embedded Signup
+app_secret = ""  # Meta App Secret
+
+[ai]
+openai_key = ""
+anthropic_key = ""
+google_key = ""
+
 # Default admin credentials (only used during initial setup when no users exist)
 [default_admin]
 email = "admin@admin.com"
