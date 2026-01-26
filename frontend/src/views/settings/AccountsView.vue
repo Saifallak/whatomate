@@ -321,10 +321,16 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
             </BreadcrumbList>
           </Breadcrumb>
         </div>
-        <Button variant="outline" size="sm" @click="openCreateDialog">
-          <Plus class="h-4 w-4 mr-2" />
-          Add Account
-        </Button>
+        <div class="flex gap-2">
+          <Button variant="default" size="sm" @click="launchWhatsAppSignup">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/6/6c/Facebook_Logo_2023.png" class="h-4 w-4 mr-2 bg-white rounded-full" alt="Facebook" />
+            Connect with WhatsApp
+          </Button>
+          <Button variant="outline" size="sm" @click="openCreateDialog">
+            <Plus class="h-4 w-4 mr-2" />
+            Manual Entry
+          </Button>
+        </div>
       </div>
     </header>
 
