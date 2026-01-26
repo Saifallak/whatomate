@@ -105,6 +105,11 @@ function getAvatarGradient(name: string): string {
   return avatarGradients[Math.abs(hash) % avatarGradients.length]
 }
 
+function formatPhoneNumber(phone: string | undefined): string {
+  if (!phone) return ''
+  return phone.replace(/\D/g, '')
+}
+
 const route = useRoute()
 const router = useRouter()
 const contactsStore = useContactsStore()
@@ -1238,22 +1243,22 @@ async function sendMediaMessage() {
             <Avatar class="h-9 w-9 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
-                {{ getInitials(contact.name || contact.phone_number) }}
+                {{ getInitials(contact.name || formatPhoneNumber(contact.phone_number)) }}
               </AvatarFallback>
             </Avatar>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center justify-between">
-                <p class="text-sm font-medium truncate text-white light:text-gray-900">
-                  {{ contact.name || contact.phone_number }}
-                </p>
+            <div class="flex-1 min-w-0 text-left">
+              <div class="flex justify-between items-baseline mb-0.5">
+                <span class="font-medium truncate" :class="{ 'text-zinc-900 dark:text-zinc-100': contactsStore.currentContact?.id === contact.id }">
+                  {{ contact.name || formatPhoneNumber(contact.phone_number) }}
+                </span>
                 <span class="text-[11px] text-white/40 light:text-gray-500">
                   {{ formatContactTime(contact.last_message_at) }}
                 </span>
               </div>
               <div class="flex items-center justify-between">
-                <p class="text-xs text-white/50 light:text-gray-500 truncate">
-                  {{ contact.phone_number }}
-                </p>
+                <div class="text-xs text-muted-foreground truncate" v-if="contact.name">
+                  {{ formatPhoneNumber(contact.phone_number) }}
+                </div>
                 <Badge v-if="contact.unread_count > 0" class="ml-2 h-5 text-[10px] bg-emerald-500/20 text-emerald-400 light:bg-emerald-100 light:text-emerald-700">
                   {{ contact.unread_count }}
                 </Badge>
@@ -1308,20 +1313,20 @@ async function sendMediaMessage() {
             <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">
-                {{ getInitials(contactsStore.currentContact.name || contactsStore.currentContact.phone_number) }}
+                {{ getInitials(contactsStore.currentContact.name || formatPhoneNumber(contactsStore.currentContact.phone_number)) }}
               </AvatarFallback>
             </Avatar>
             <div>
               <div class="flex items-center gap-1.5">
                 <p class="text-sm font-medium text-white light:text-gray-900">
-                  {{ contactsStore.currentContact.name || contactsStore.currentContact.phone_number }}
+                  {{ contactsStore.currentContact.name || formatPhoneNumber(contactsStore.currentContact.phone_number) }}
                 </p>
                 <Badge v-if="activeTransferId" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
                   Paused
                 </Badge>
               </div>
-              <p class="text-[11px] text-white/50 light:text-gray-500">
-                {{ contactsStore.currentContact.phone_number }}
+              <p class="text-xs text-muted-foreground" v-if="contactsStore.currentContact.name">
+                {{ formatPhoneNumber(contactsStore.currentContact.phone_number) }}
               </p>
             </div>
           </div>
