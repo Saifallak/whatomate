@@ -57,7 +57,8 @@ import {
   ExternalLink,
   AlertCircle,
   CheckCircle2,
-  Settings2
+  Settings2,
+  HelpCircle
 } from 'lucide-vue-next'
 
 interface WhatsAppAccount {
@@ -78,6 +79,7 @@ interface WhatsAppAccount {
   display_name?: string
   created_at: string
   updated_at: string
+  pin?: string
 }
 
 interface TestResult {
@@ -100,6 +102,264 @@ const testingAccountId = ref<string | null>(null)
 const testResults = ref<Record<string, TestResult>>({})
 const deleteDialogOpen = ref(false)
 const accountToDelete = ref<WhatsAppAccount | null>(null)
+
+// Facebook SDK
+declare global {
+  interface Window {
+    FB: any
+    fbAsyncInit: () => void
+  }
+}
+
+// Load Facebook SDK
+const loadFacebookSDK = () => {
+  return new Promise<void>((resolve) => {
+    if (window.FB) {
+      resolve()
+      return
+    }
+
+    window.fbAsyncInit = function() {
+      // Config ID for "WhatsApp Embedded Signup"
+      // You should replace 'YOUR_CONFIG_ID' with the actual configuration ID you created in Meta Business Manager
+      // If config_id is dynamic, fetch it from backend. For now we assume env or hardcoded.
+      // Since we don't have the config ID yet, we'll try to find it or ask user.
+      // NOTE: The user needs to provide: App ID, Config ID.
+      // We will init with App ID.
+      // For now, we'll assume a placeholder or env var if available.
+      // Let's rely on the button click to trigger login with config_id.
+    }
+
+    const script = document.createElement('script')
+    script.src = 'https://connect.facebook.net/en_US/sdk.js'
+    script.async = true
+    script.defer = true
+    script.onload = () => resolve()
+    document.body.appendChild(script)
+  })
+}
+
+const initFacebook = async () => {
+  await loadFacebookSDK()
+
+  const checkFB = setInterval(() => {
+    if (window.FB) {
+      clearInterval(checkFB)
+      const appId = import.meta.env.VITE_WHATSAPP_APP_ID || ''
+
+      window.FB.init({
+        appId            : appId,
+        autoLogAppEvents : true,
+        xfbml            : true,
+        version          : 'v21.0'
+      })
+    }
+  }, 100)
+}
+
+onMounted(async () => {
+  await fetchAccounts()
+  await initFacebook()
+})
+
+async function launchWhatsAppSignup() {
+  if (!window.FB) {
+    toast.error('Facebook SDK not loaded')
+    return
+  }
+
+  // The Config ID for the Embedded Signup flow
+  const configId = import.meta.env.VITE_WHATSAPP_CONFIG_ID || ''
+
+  if (!configId) {
+    toast.error('WhatsApp Configuration ID is missing in environment variables')
+    return
+  }
+
+  window.FB.login((response: any) => {
+    if (response.authResponse) {
+      const { code } = response.authResponse
+
+      // If we used "response_type: 'code'", we get a code.
+      // For embedded signup, usually we get a code to exchange.
+      if (code) {
+        exchangeCodeForToken(code).catch(err => console.error(err))
+      } else {
+        // Sometimes it returns accessToken directly if configured that way,
+        // but for system user token exchange we usually want code.
+        // Let's assume we get a code.
+        toast.error('No code received from Facebook')
+      }
+    }
+  }, {
+    config_id: configId,
+    response_type: 'code',
+    override_default_response_type: true,
+    extras: {
+      sessionInfoVersion: 2,
+    }
+  })
+}
+
+async function exchangeCodeForToken(code: string) {
+  // Wait a moment for the message event to populate pendingSignupData
+  // because the message event might fire slightly after or before the callback
+
+  let attempts = 0
+  const maxAttempts = 20 // 2 seconds timeout
+
+  const checkData = setInterval(async () => {
+    attempts++
+    if (pendingSignupData.value) {
+      clearInterval(checkData)
+      await finishSignup(code)
+    } else if (attempts >= maxAttempts) {
+      clearInterval(checkData)
+       // Fallback: If we don't get the message event data (e.g. strict privacy settings or different flow),
+       // we can't proceed with the current backend requirement (requiring phone_id).
+       // We'll show an error or try to ask the user?
+       // For now, let's treat it as an error.
+       toast.error('Could not retrieve signup details. Please try again.')
+    }
+  }, 100)
+}
+
+// Global listener for the embedded signup response data
+window.addEventListener('message', (event) => {
+   if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") {
+     return;
+   }
+
+   try {
+     const data = JSON.parse(event.data);
+     if (data.type === 'WA_EMBEDDED_SIGNUP') {
+        // status: 'connected', event: 'sessionInfo', data: { waba_id, phone_number_id, ... }
+        if (data.event === 'FINISH' && data.data) {
+           const { phone_number_id, waba_id } = data.data;
+           pendingSignupData.value = { phone_number_id, waba_id };
+        }
+     }
+   } catch (e) {
+     // ignore non-json
+   }
+});
+
+const pendingSignupData = ref<{phone_number_id: string, waba_id: string} | null>(null)
+
+// Updated exchange function
+const needsPin = ref(false)
+const userPin = ref('')
+const registeringAccountId = ref<string | null>(null)
+
+async function finishSignup(code: string) {
+    if (!pendingSignupData.value) {
+       toast.error('Missing signup data (phone ID). Please try again.')
+       return
+    }
+
+    try {
+        isLoading.value = true
+        const payload = {
+            code: code,
+            phone_id: pendingSignupData.value.phone_number_id,
+            waba_id: pendingSignupData.value.waba_id,
+        }
+
+        const response = await api.post('/accounts/exchange-token', payload)
+        toast.success('WhatsApp account connected successfully!')
+        
+        // Auto-register phone (Two-Step Verification)
+        if (response.data.data?.id) {
+           await registerPhone(response.data.data.id)
+        }
+        
+        await fetchAccounts()
+    } catch (error: any) {
+        toast.error(error.response?.data?.message || 'Failed to connect account')
+    } finally {
+        isLoading.value = false
+        pendingSignupData.value = null
+    }
+}
+
+async function registerPhone(accountId: string, pin?: string) {
+  try {
+    const payload = pin ? { pin } : {}
+    const response = await api.post(`/accounts/${accountId}/register`, payload)
+    
+    if (response.data.data?.success) {
+       toast.success('Phone number registered for WhatsApp API!')
+       needsPin.value = false
+       userPin.value = ''
+       registeringAccountId.value = null
+       await fetchAccounts()
+    } else {
+       // Should be caught by catch block if status != 200, 
+       // but if backend returns 200 with success=false (custom envelope), check here.
+       throw new Error(response.data.data?.error || 'Registration failed')
+    }
+  } catch (error: any) {
+     console.error('Registration error:', error)
+     const errorMsg = error.response?.data?.data?.error || error.response?.data?.message || error.message || 'Registration failed'
+     
+     if (!pin) { 
+         const friendlyMsg = getFriendlyErrorMessage(errorMsg)
+         toast.error(friendlyMsg)
+         
+         const isPinError = checkIsPinError(errorMsg)
+         
+         if (isPinError) {
+             console.log('Opening PIN dialog due to PIN-related error')
+             needsPin.value = true
+             registeringAccountId.value = accountId
+         }
+     } else {
+         const friendlyMsg = getFriendlyErrorMessage(errorMsg)
+         toast.error(friendlyMsg)
+     }
+  }
+}
+
+function checkIsPinError(msg: string) {
+    const m = msg.toLowerCase()
+    return m.includes('pin') || m.includes('two-step') || m.includes('verification code') || m.includes('136024')
+}
+
+function getFriendlyErrorMessage(rawMsg: string): string {
+  // Rate Limit (133016)
+  if (rawMsg.includes('133016') || rawMsg.includes('too many attempts')) {
+    return 'Too many registration attempts. Please wait 5-10 minutes and try again.'
+  }
+  
+  // Account Status / Linking (#100)
+  if (rawMsg.includes('(#100)') || rawMsg.includes('non-approved') || rawMsg.includes('pending Whatsapp business')) {
+    return 'Meta Business Account Not Ready. Please check "Business Settings" in Meta to ensure your account is approved and has a payment method.'
+  }
+  
+  // PIN Error (136024)
+  if (rawMsg.includes('136024') || rawMsg.includes('mismatch')) {
+     return 'Incorrect PIN. Please try again.'
+  }
+  
+  // Generic cleanup: Remove "Registration failed: registration API failed: " clutter
+  if (rawMsg.includes('{')) {
+      // Try to extract just the message from JSON if parsing fails or fallback
+      try {
+          // Attempt to find JSON part
+          const jsonStart = rawMsg.indexOf('{')
+          const jsonEnd = rawMsg.lastIndexOf('}')
+          if (jsonStart > -1 && jsonEnd > jsonStart) {
+              const jsonStr = rawMsg.substring(jsonStart, jsonEnd + 1)
+              const parsed = JSON.parse(jsonStr)
+              if (parsed.error && parsed.error.message) {
+                  return parsed.error.message
+              }
+          }
+      } catch (e) {/* ignore */}
+  }
+
+  return rawMsg
+}
 
 const formData = ref({
   name: '',
@@ -234,6 +494,12 @@ async function confirmDelete() {
   }
 }
 
+function handlePinSubmit() {
+  if (registeringAccountId.value && userPin.value) {
+     registerPhone(registeringAccountId.value, userPin.value)
+  }
+}
+
 async function testConnection(account: WhatsAppAccount) {
   testingAccountId.value = account.id
   try {
@@ -263,13 +529,39 @@ function copyToClipboard(text: string, label: string) {
 function getStatusBadgeClass(status: string) {
   switch (status) {
     case 'active':
-      return 'bg-green-900 text-green-300 light:bg-green-100 light:text-green-800'
+      return 'bg-green-500/10 text-green-400 border border-green-500/20'
+    case 'pending_registration':
+      return 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
     case 'inactive':
-      return 'bg-gray-800 text-gray-300 light:bg-gray-100 light:text-gray-800'
-    case 'error':
-      return 'bg-red-900 text-red-300 light:bg-red-100 light:text-red-800'
+      return 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
     default:
-      return 'bg-yellow-900 text-yellow-300 light:bg-yellow-100 light:text-yellow-800'
+      return 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+  }
+}
+
+function getStatusLabel(status: string) {
+  switch (status) {
+    case 'active':
+      return 'Active'
+    case 'pending_registration':
+      return 'Action Required'
+    case 'inactive':
+      return 'Inactive'
+    default:
+      return status?.charAt(0).toUpperCase() + status?.slice(1) || 'Unknown'
+  }
+}
+
+function getStatusDescription(status: string) {
+  switch (status) {
+    case 'active':
+      return 'Account is fully connected and ready to send/receive messages.'
+    case 'pending_registration':
+      return 'Wait! The phone number is not fully registered with Meta yet. You may need to enter a PIN or fix account issues in Meta Business Manager.'
+    case 'inactive':
+      return 'Account is disabled. No messages will be processed.'
+    default:
+      return 'Account status is unknown.'
   }
 }
 
@@ -304,10 +596,16 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
             </BreadcrumbList>
           </Breadcrumb>
         </div>
-        <Button variant="outline" size="sm" @click="openCreateDialog">
-          <Plus class="h-4 w-4 mr-2" />
-          Add Account
-        </Button>
+        <div class="flex gap-2">
+          <Button variant="default" size="sm" @click="launchWhatsAppSignup">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/6/6c/Facebook_Logo_2023.png" class="h-4 w-4 mr-2 bg-white rounded-full" alt="Facebook" />
+            Connect with WhatsApp
+          </Button>
+          <Button variant="outline" size="sm" @click="openCreateDialog">
+            <Plus class="h-4 w-4 mr-2" />
+            Manual Entry
+          </Button>
+        </div>
       </div>
     </header>
 
@@ -375,13 +673,37 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
                 <div class="min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
                     <h3 class="font-semibold text-lg text-white light:text-gray-900">{{ account.name }}</h3>
-                    <span :class="['px-2 py-0.5 text-xs font-medium rounded-full', getStatusBadgeClass(account.status)]">
-                      {{ account.status }}
-                    </span>
+                    
+                    <!-- Status Badge with Tooltip -->
+                    <div class="flex items-center gap-2">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger as-child>
+                              <div class="flex items-center gap-1 cursor-help">
+                                <span :class="['px-2 py-0.5 text-xs font-medium rounded-full flex items-center gap-1', getStatusBadgeClass(account.status)]">
+                                  {{ getStatusLabel(account.status) }}
+                                  <HelpCircle class="h-3 w-3 opacity-70" />
+                                </span>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p class="max-w-[200px] text-xs">{{ getStatusDescription(account.status) }}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                    </div>
                   </div>
 
-                  <!-- Test Result -->
-                  <div v-if="testResults[account.id]" class="mt-2">
+                  <!-- Retry Action for Verification -->
+                   <div v-if="account.status === 'pending_registration'" class="mt-2 flex items-center gap-2 bg-yellow-950/30 p-2 rounded border border-yellow-900/50">
+                       <AlertCircle class="h-4 w-4 text-yellow-500" />
+                       <span class="text-xs text-yellow-200">Registration incomplete.</span>
+                       <Button variant="secondary" size="sm" class="h-6 text-xs ml-auto" @click="registerPhone(account.id)">
+                         Verify & Retry
+                       </Button>
+                   </div>
+
+                  <div v-if="testResults[account.id]" class="mt-2 text-sm">
                     <div v-if="testResults[account.id].success" class="flex items-center gap-2 text-green-400 light:text-green-600">
                       <CheckCircle2 class="h-4 w-4" />
                       <span class="text-sm font-medium">Connected</span>
@@ -518,7 +840,7 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
           <CardContent class="p-6">
             <h3 class="font-semibold flex items-center gap-2 mb-4">
               <Settings2 class="h-5 w-5" />
-              Setup Guide
+              Manuel Entry Guide
             </h3>
             <ol class="list-decimal list-inside space-y-3 text-sm text-muted-foreground">
               <li>
@@ -708,6 +1030,16 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
           <AlertDialogDescription>
             Are you sure you want to delete "{{ accountToDelete?.name }}"? This action cannot be undone.
           </AlertDialogDescription>
+          <!-- Warning for PIN -->
+          <div v-if="accountToDelete?.pin" class="mt-4 p-3 bg-red-950/30 border border-red-900 rounded-lg">
+             <p class="text-sm text-red-400 font-medium mb-1">Warning: 2FA PIN Registered</p>
+             <p class="text-xs text-red-300">
+               This account has a registered 2FA PIN: <code class="bg-black/30 px-1 rounded text-white">{{ accountToDelete.pin }}</code>
+             </p>
+             <p class="text-xs text-red-300 mt-1">
+               Please save this PIN. You will need it if you want to register this phone number with another WhatsApp provider.
+             </p>
+          </div>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -717,5 +1049,34 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <!-- PIN Input Dialog for Retry -->
+    <Dialog v-model:open="needsPin">
+      <DialogContent class="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Enter Two-Step Verification PIN</DialogTitle>
+          <DialogDescription>
+            This phone number is already registered with a PIN. Please enter it to verify ownership.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div class="space-y-4 py-4">
+           <div class="space-y-2">
+             <Label for="pin">6-Digit PIN</Label>
+             <Input id="pin" v-model="userPin" placeholder="000000" maxlength="6" pattern="\d*" />
+             <p class="text-xs text-muted-foreground">
+               Forgot your PIN? <a href="https://business.facebook.com/wa/manage/phone-numbers/" target="_blank" class="text-primary hover:underline">Reset it in WhatsApp Manager</a>.
+             </p>
+           </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="needsPin = false">Cancel</Button>
+          <Button @click="handlePinSubmit" :disabled="!userPin || userPin.length < 6">
+             Register
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

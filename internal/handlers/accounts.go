@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -48,6 +49,7 @@ type AccountResponse struct {
 	DisplayName        string    `json:"display_name,omitempty"`
 	CreatedAt          string    `json:"created_at"`
 	UpdatedAt          string    `json:"updated_at"`
+	Pin                string    `json:"pin,omitempty"` // Only exposed when necessary (e.g. deletion warning)
 }
 
 // ListAccounts returns all WhatsApp accounts for the organization
@@ -326,6 +328,255 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 	})
 }
 
+// ExchangeToken exchanges the temporary code for a permanent access token and creates the account
+// ExchangeToken exchanges the temporary code for a permanent access token and creates the account
+func (a *App) ExchangeToken(r *fastglue.Request) error {
+	orgID, err := getOrganizationID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	var req struct {
+		Code               string `json:"code" validate:"required"`
+		SetupToken         string `json:"setup_token"` // Optional
+		PhoneID            string `json:"phone_id" validate:"required"`
+		WABAID             string `json:"waba_id" validate:"required"`
+		Name               string `json:"name"`
+		WebhookVerifyToken string `json:"webhook_verify_token"`
+	}
+	if err := r.Decode(&req, "json"); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+
+	if req.Code == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Code is required", nil, "")
+	}
+
+	// 1. Exchange code for user access token
+	url := fmt.Sprintf("%s/%s/oauth/access_token?client_id=%s&client_secret=%s&code=%s",
+		a.Config.WhatsApp.BaseURL, a.Config.WhatsApp.APIVersion,
+		a.Config.WhatsApp.AppID, a.Config.WhatsApp.AppSecret, req.Code)
+
+	resp, err := a.HTTPClient.Get(url)
+	if err != nil {
+		a.Log.Error("Failed to exchange token", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to exchange token", nil, "")
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		a.Log.Error("Token exchange failed", "status", resp.Status, "body", string(body))
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Token exchange failed", nil, "")
+	}
+
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to parse token response", nil, "")
+	}
+
+	// 2. We can now create/update the account
+	// Check if account already exists
+	var account models.WhatsAppAccount
+	var existingAccount bool
+	if err := a.DB.Where("phone_id = ? AND organization_id = ?", req.PhoneID, orgID).First(&account).Error; err == nil {
+		existingAccount = true
+	}
+
+	if req.Name == "" {
+		// Try to fetch name from Meta
+		metaName, err := a.fetchPhoneNumberName(req.PhoneID, tokenResp.AccessToken)
+		if err == nil && metaName != "" {
+			// Append 4 random digits to avoid duplicates
+			req.Name = fmt.Sprintf("%s %s", metaName, generateNumericPIN(4))
+		} else {
+			req.Name = "WhatsApp Account " + req.PhoneID[len(req.PhoneID)-4:]
+		}
+	}
+
+	// Generate verify token if needed
+	if req.WebhookVerifyToken == "" {
+		if existingAccount {
+			req.WebhookVerifyToken = account.WebhookVerifyToken
+		} else {
+			req.WebhookVerifyToken = generateVerifyToken()
+		}
+	}
+
+	account.OrganizationID = orgID
+	account.Name = req.Name
+	account.AppID = a.Config.WhatsApp.AppID
+	account.PhoneID = req.PhoneID
+	account.BusinessID = req.WABAID
+	account.AccessToken = tokenResp.AccessToken
+	account.AppSecret = a.Config.WhatsApp.AppSecret
+	account.WebhookVerifyToken = req.WebhookVerifyToken
+	account.APIVersion = a.Config.WhatsApp.APIVersion
+	account.Status = "pending_registration" // Helper status until 2FA is done
+
+	if !existingAccount {
+		// defaults
+		account.IsDefaultIncoming = false
+		account.IsDefaultOutgoing = false
+		account.AutoReadReceipt = false
+	}
+
+	// 3. Attempt Auto-Registration with random PIN
+	// We do this BEFORE subscribing so the phone is "ready" (User suggestion/Hypothesis check)
+	generatedPin := generateNumericPIN(6)
+	regErr := a.performRegistration(account.PhoneID, generatedPin, tokenResp.AccessToken, account.APIVersion)
+
+	if regErr == nil {
+		account.Status = "active"
+		account.Pin = generatedPin
+	} else {
+		a.Log.Warn("Auto-registration failed (likely existing PIN or permissions)", "error", regErr)
+		account.Status = "pending_registration"
+	}
+
+	// 4. Subscribe app to WABA webhooks
+	// Now that we attempted registration, let's link the app.
+	if err := a.subscribeAppToWABA(req.WABAID, tokenResp.AccessToken); err != nil {
+		a.Log.Error("Failed to subscribe app to WABA", "error", err)
+	}
+
+	if err := a.DB.Save(&account).Error; err != nil {
+		a.Log.Error("Failed to save account", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account: "+err.Error(), nil, "")
+	}
+
+	// Invalidate cache
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+
+	// Return response
+	// If status is pending_registration, frontend will handle the PIN prompt
+	accResp := accountToResponse(account)
+	return r.SendEnvelope(accResp)
+}
+
+// Helper to perform the actual registration call
+func (a *App) performRegistration(phoneID, pin, accessToken, apiVersion string) error {
+	url := fmt.Sprintf("%s/%s/%s/register",
+		a.Config.WhatsApp.BaseURL, apiVersion, phoneID)
+
+	payload := map[string]string{
+		"messaging_product": "whatsapp",
+		"pin":               pin,
+	}
+	jsonPayload, _ := json.Marshal(payload)
+
+	httpReq, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	httpReq.Header.Set("Authorization", "Bearer "+accessToken)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.WhatsApp.HTTPClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("registration API failed: %s", string(body))
+	}
+
+	return nil
+}
+
+// RegisterPhone registers the phone number with Two-Step Verification
+func (a *App) RegisterPhone(r *fastglue.Request) error {
+	orgID, err := getOrganizationID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	idStr := r.RequestCtx.UserValue("id").(string)
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid account ID", nil, "")
+	}
+
+	var req struct {
+		Pin string `json:"pin"` // Optional custom PIN
+	}
+	_ = r.Decode(&req, "json")
+
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Account not found", nil, "")
+	}
+
+	// If PIN is not provided, generate a random one
+	pin := req.Pin
+	if pin == "" {
+		pin = generateNumericPIN(6)
+	}
+
+	// Call Meta Register endpoint
+	if err := a.performRegistration(account.PhoneID, pin, account.AccessToken, account.APIVersion); err != nil {
+		a.Log.Error("Manual registration failed", "error", err)
+		return r.SendEnvelope(map[string]interface{}{
+			"success": false,
+			"error":   "Registration failed: " + err.Error(),
+		})
+	}
+
+	// Success
+	account.Status = "active"
+	account.Pin = pin // Save the PIN
+
+	if err := a.DB.Save(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account status", nil, "")
+	}
+
+	// Invalidate cache
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+
+	return r.SendEnvelope(map[string]interface{}{
+		"success": true,
+		"message": "Phone number registered successfully",
+		"pin":     pin, // Return PIN so frontend can show it one time if needed, or we rely on them getting it from DB later?
+		// Better not to return it if we generated it, OR return it so user knows it?
+		// We'll show it in the UI "Saved PIN: XXXXXX".
+	})
+}
+
+// subscribeAppToWABA subscribes the app to the WABA's webhooks
+func (a *App) subscribeAppToWABA(wabaID, accessToken string) error {
+	url := fmt.Sprintf("%s/%s/%s/subscribed_apps",
+		a.Config.WhatsApp.BaseURL, a.Config.WhatsApp.APIVersion, wabaID)
+
+	// POST request to subscribe
+	req, _ := http.NewRequest("POST", url, nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := a.WhatsApp.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("subscribe failed: %s", string(body))
+	}
+
+	return nil
+}
+
+func generateNumericPIN(length int) string {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "123456" // Fallback
+	}
+	for i := range b {
+		b[i] = (b[i] % 10) + '0'
+	}
+	return string(b)
+}
+
 // Helper functions
 
 func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
@@ -345,7 +596,40 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		HasAppSecret:       acc.AppSecret != "",
 		CreatedAt:          acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:          acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		Pin:                acc.Pin,
 	}
+}
+
+func (a *App) fetchPhoneNumberName(phoneID, accessToken string) (string, error) {
+	url := fmt.Sprintf("%s/%s/%s?fields=verified_name,display_phone_number",
+		a.Config.WhatsApp.BaseURL, a.Config.WhatsApp.APIVersion, phoneID)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := a.WhatsApp.HTTPClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("failed to fetch phone details: %s", resp.Status)
+	}
+
+	var body struct {
+		VerifiedName       string `json:"verified_name"`
+		DisplayPhoneNumber string `json:"display_phone_number"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", err
+	}
+
+	if body.VerifiedName != "" {
+		return body.VerifiedName, nil
+	}
+	return body.DisplayPhoneNumber, nil
 }
 
 func generateVerifyToken() string {
