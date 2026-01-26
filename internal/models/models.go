@@ -110,8 +110,8 @@ type User struct {
 	RoleID         *uuid.UUID `gorm:"type:uuid;index" json:"role_id,omitempty"`
 	Settings       JSONB      `gorm:"type:jsonb;default:'{}'" json:"settings"`
 	IsActive       bool       `gorm:"default:true" json:"is_active"`
-	IsAvailable    bool       `gorm:"default:true" json:"is_available"` // Agent availability status (away/available)
-	IsSuperAdmin   bool       `gorm:"default:false" json:"is_super_admin"`  // Super admin can access all organizations
+	IsAvailable    bool       `gorm:"default:true" json:"is_available"`    // Agent availability status (away/available)
+	IsSuperAdmin   bool       `gorm:"default:false" json:"is_super_admin"` // Super admin can access all organizations
 
 	// SSO fields
 	SSOProvider   string `gorm:"size:50" json:"sso_provider,omitempty"`     // google, microsoft, github, facebook, custom
@@ -146,11 +146,11 @@ func (UserAvailabilityLog) TableName() string {
 // Team represents a group of agents handling specific types of chats
 type Team struct {
 	BaseModel
-	OrganizationID     uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
-	Name               string    `gorm:"size:100;not null" json:"name"`
-	Description        string    `gorm:"size:500" json:"description"`
+	OrganizationID     uuid.UUID          `gorm:"type:uuid;index;not null" json:"organization_id"`
+	Name               string             `gorm:"size:100;not null" json:"name"`
+	Description        string             `gorm:"size:500" json:"description"`
 	AssignmentStrategy AssignmentStrategy `gorm:"size:50;default:'round_robin'" json:"assignment_strategy"` // round_robin, load_balanced, manual
-	IsActive           bool      `gorm:"default:true" json:"is_active"`
+	IsActive           bool               `gorm:"default:true" json:"is_active"`
 
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
@@ -206,10 +206,10 @@ type SSOProvider struct {
 	Provider        string    `gorm:"size:50;not null" json:"provider"` // google, microsoft, github, facebook, custom
 	ClientID        string    `gorm:"size:500;not null" json:"client_id"`
 	ClientSecret    string    `gorm:"size:500;not null" json:"-"` // Never exposed in JSON
-	IsEnabled       bool   `gorm:"default:false" json:"is_enabled"`
-	AllowAutoCreate bool   `gorm:"default:false" json:"allow_auto_create"`         // Auto-create new users on SSO login
-	DefaultRoleName string `gorm:"size:50;default:'agent'" json:"default_role"`    // Role name for auto-created users (references CustomRole.Name)
-	AllowedDomains  string    `gorm:"type:text" json:"allowed_domains,omitempty"` // Comma-separated email domains
+	IsEnabled       bool      `gorm:"default:false" json:"is_enabled"`
+	AllowAutoCreate bool      `gorm:"default:false" json:"allow_auto_create"`      // Auto-create new users on SSO login
+	DefaultRoleName string    `gorm:"size:50;default:'agent'" json:"default_role"` // Role name for auto-created users (references CustomRole.Name)
+	AllowedDomains  string    `gorm:"type:text" json:"allowed_domains,omitempty"`  // Comma-separated email domains
 
 	// Custom OIDC provider fields (only used when Provider = "custom")
 	AuthURL     string `gorm:"size:500" json:"auth_url,omitempty"`
@@ -246,13 +246,13 @@ func (Webhook) TableName() string {
 // CustomAction represents a custom action button for chat integrations
 type CustomAction struct {
 	BaseModel
-	OrganizationID uuid.UUID `gorm:"type:uuid;index;not null" json:"organization_id"`
-	Name           string    `gorm:"size:100;not null" json:"name"`
-	Icon           string    `gorm:"size:50" json:"icon"`                      // lucide icon name
-	ActionType     ActionType `gorm:"size:20;not null" json:"action_type"`     // webhook, url, javascript
-	Config         JSONB     `gorm:"type:jsonb;default:'{}'" json:"config"`    // Type-specific configuration
-	IsActive       bool      `gorm:"default:true" json:"is_active"`
-	DisplayOrder   int       `gorm:"default:0" json:"display_order"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	Name           string     `gorm:"size:100;not null" json:"name"`
+	Icon           string     `gorm:"size:50" json:"icon"`                   // lucide icon name
+	ActionType     ActionType `gorm:"size:20;not null" json:"action_type"`   // webhook, url, javascript
+	Config         JSONB      `gorm:"type:jsonb;default:'{}'" json:"config"` // Type-specific configuration
+	IsActive       bool       `gorm:"default:true" json:"is_active"`
+	DisplayOrder   int        `gorm:"default:0" json:"display_order"`
 
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
@@ -278,6 +278,7 @@ type WhatsAppAccount struct {
 	IsDefaultOutgoing  bool      `gorm:"default:false" json:"is_default_outgoing"`
 	AutoReadReceipt    bool      `gorm:"default:false" json:"auto_read_receipt"`
 	Status             string    `gorm:"size:20;default:'active'" json:"status"`
+	Pin                string    `gorm:"size:6" json:"-"` // 6-digit 2FA PIN (never exposed in JSON)
 
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
@@ -318,27 +319,27 @@ func (Contact) TableName() string {
 // Message represents a WhatsApp message
 type Message struct {
 	BaseModel
-	OrganizationID    uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
-	WhatsAppAccount   string     `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
-	ContactID         uuid.UUID  `gorm:"type:uuid;index;not null" json:"contact_id"`
-	WhatsAppMessageID string     `gorm:"column:whats_app_message_id;size:255;index" json:"whatsapp_message_id"`
-	ConversationID    string     `gorm:"size:255;index" json:"conversation_id"`
-	Direction         Direction   `gorm:"size:10;not null" json:"direction"`
-	MessageType       MessageType `gorm:"size:20;not null" json:"message_type"`
-	Content           string     `gorm:"type:text" json:"content"`
-	MediaURL          string     `gorm:"type:text" json:"media_url"`
-	MediaMimeType     string     `gorm:"size:100" json:"media_mime_type"`
-	MediaFilename     string     `gorm:"size:255" json:"media_filename"`
-	TemplateName      string     `gorm:"size:255" json:"template_name"`
-	TemplateParams    JSONB      `gorm:"type:jsonb" json:"template_params"`
-	InteractiveData   JSONB      `gorm:"type:jsonb" json:"interactive_data"`
-	FlowResponse      JSONB      `gorm:"type:jsonb" json:"flow_response"`
+	OrganizationID    uuid.UUID     `gorm:"type:uuid;index;not null" json:"organization_id"`
+	WhatsAppAccount   string        `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
+	ContactID         uuid.UUID     `gorm:"type:uuid;index;not null" json:"contact_id"`
+	WhatsAppMessageID string        `gorm:"column:whats_app_message_id;size:255;index" json:"whatsapp_message_id"`
+	ConversationID    string        `gorm:"size:255;index" json:"conversation_id"`
+	Direction         Direction     `gorm:"size:10;not null" json:"direction"`
+	MessageType       MessageType   `gorm:"size:20;not null" json:"message_type"`
+	Content           string        `gorm:"type:text" json:"content"`
+	MediaURL          string        `gorm:"type:text" json:"media_url"`
+	MediaMimeType     string        `gorm:"size:100" json:"media_mime_type"`
+	MediaFilename     string        `gorm:"size:255" json:"media_filename"`
+	TemplateName      string        `gorm:"size:255" json:"template_name"`
+	TemplateParams    JSONB         `gorm:"type:jsonb" json:"template_params"`
+	InteractiveData   JSONB         `gorm:"type:jsonb" json:"interactive_data"`
+	FlowResponse      JSONB         `gorm:"type:jsonb" json:"flow_response"`
 	Status            MessageStatus `gorm:"size:20;default:'pending'" json:"status"`
-	ErrorMessage      string     `gorm:"type:text" json:"error_message"`
-	IsReply           bool       `gorm:"default:false" json:"is_reply"`
-	ReplyToMessageID  *uuid.UUID `gorm:"type:uuid" json:"reply_to_message_id,omitempty"`
-	SentByUserID      *uuid.UUID `gorm:"type:uuid;index" json:"sent_by_user_id,omitempty"` // User who sent outgoing message
-	Metadata          JSONB      `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	ErrorMessage      string        `gorm:"type:text" json:"error_message"`
+	IsReply           bool          `gorm:"default:false" json:"is_reply"`
+	ReplyToMessageID  *uuid.UUID    `gorm:"type:uuid" json:"reply_to_message_id,omitempty"`
+	SentByUserID      *uuid.UUID    `gorm:"type:uuid;index" json:"sent_by_user_id,omitempty"` // User who sent outgoing message
+	Metadata          JSONB         `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Relations
 	Organization   *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
@@ -360,14 +361,14 @@ type Template struct {
 	Name            string     `gorm:"size:255;not null" json:"name"`
 	DisplayName     string     `gorm:"size:255" json:"display_name"`
 	Language        string     `gorm:"size:10;not null" json:"language"`
-	Category        string     `gorm:"size:50" json:"category"`                       // MARKETING, UTILITY, AUTHENTICATION
-	Status          string     `gorm:"size:20;default:'PENDING'" json:"status"`       // PENDING, APPROVED, REJECTED
-	HeaderType      string     `gorm:"size:20" json:"header_type"`                    // TEXT, IMAGE, DOCUMENT, VIDEO
+	Category        string     `gorm:"size:50" json:"category"`                 // MARKETING, UTILITY, AUTHENTICATION
+	Status          string     `gorm:"size:20;default:'PENDING'" json:"status"` // PENDING, APPROVED, REJECTED
+	HeaderType      string     `gorm:"size:20" json:"header_type"`              // TEXT, IMAGE, DOCUMENT, VIDEO
 	HeaderContent   string     `gorm:"type:text" json:"header_content"`
 	BodyContent     string     `gorm:"type:text;not null" json:"body_content"`
 	FooterContent   string     `gorm:"type:text" json:"footer_content"`
-	Buttons         JSONBArray  `gorm:"type:jsonb;default:'[]'" json:"buttons"`
-	SampleValues    JSONBArray  `gorm:"type:jsonb;default:'[]'" json:"sample_values"`
+	Buttons         JSONBArray `gorm:"type:jsonb;default:'[]'" json:"buttons"`
+	SampleValues    JSONBArray `gorm:"type:jsonb;default:'[]'" json:"sample_values"`
 
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
@@ -417,7 +418,7 @@ type DashboardWidget struct {
 	Color          string     `gorm:"size:20" json:"color"`                         // Widget color theme
 	Size           string     `gorm:"size:10;default:'small'" json:"size"`          // small, medium, large
 	DisplayOrder   int        `gorm:"default:0" json:"display_order"`
-	IsShared       bool       `gorm:"default:false" json:"is_shared"` // Visible to entire org or just creator
+	IsShared       bool       `gorm:"default:false" json:"is_shared"`  // Visible to entire org or just creator
 	IsDefault      bool       `gorm:"default:false" json:"is_default"` // System default widget
 
 	// Relations

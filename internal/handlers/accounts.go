@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -48,6 +49,7 @@ type AccountResponse struct {
 	DisplayName        string    `json:"display_name,omitempty"`
 	CreatedAt          string    `json:"created_at"`
 	UpdatedAt          string    `json:"updated_at"`
+	Pin                string    `json:"pin,omitempty"` // Only exposed when necessary (e.g. deletion warning)
 }
 
 // ListAccounts returns all WhatsApp accounts for the organization
@@ -404,13 +406,32 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	account.AppSecret = a.Config.WhatsApp.AppSecret
 	account.WebhookVerifyToken = req.WebhookVerifyToken
 	account.APIVersion = a.Config.WhatsApp.APIVersion
-	account.Status = "active"
+	account.Status = "pending_registration" // Helper status until 2FA is done
 
 	if !existingAccount {
 		// defaults
 		account.IsDefaultIncoming = false
 		account.IsDefaultOutgoing = false
 		account.AutoReadReceipt = false
+	}
+
+	// 3. Subscribe app to WABA webhooks
+	if err := a.subscribeAppToWABA(req.WABAID, tokenResp.AccessToken); err != nil {
+		a.Log.Error("Failed to subscribe app to WABA", "error", err)
+	}
+
+	// 4. Attempt Auto-Registration with random PIN
+	// This is the "Happy Path". If it fails (e.g. existing PIN), we leave status as pending_registration
+	// and let the user handle it in frontend.
+	generatedPin := generateNumericPIN(6)
+	regErr := a.performRegistration(account.PhoneID, generatedPin, tokenResp.AccessToken, account.APIVersion)
+
+	if regErr == nil {
+		account.Status = "active"
+		account.Pin = generatedPin
+	} else {
+		a.Log.Warn("Auto-registration failed (likely existing PIN)", "error", regErr)
+		account.Status = "pending_registration"
 	}
 
 	if err := a.DB.Save(&account).Error; err != nil {
@@ -421,7 +442,131 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
 
+	// Check if we need to return specific error code to frontend to trigger PIN dialog immediately?
+	// We update the response to include a flag maybe?
+	// If pending, frontend knows to ask for PIN or show "Needs Registration"
 	return r.SendEnvelope(accountToResponse(account))
+}
+
+// Helper to perform the actual registration call
+func (a *App) performRegistration(phoneID, pin, accessToken, apiVersion string) error {
+	url := fmt.Sprintf("%s/%s/%s/register",
+		a.Config.WhatsApp.BaseURL, apiVersion, phoneID)
+
+	payload := map[string]string{
+		"messaging_product": "whatsapp",
+		"pin":               pin,
+	}
+	jsonPayload, _ := json.Marshal(payload)
+
+	httpReq, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	httpReq.Header.Set("Authorization", "Bearer "+accessToken)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.WhatsApp.HTTPClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("registration API failed: %s", string(body))
+	}
+
+	return nil
+}
+
+// RegisterPhone registers the phone number with Two-Step Verification
+func (a *App) RegisterPhone(r *fastglue.Request) error {
+	orgID, err := getOrganizationID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	idStr := r.RequestCtx.UserValue("id").(string)
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid account ID", nil, "")
+	}
+
+	var req struct {
+		Pin string `json:"pin"` // Optional custom PIN
+	}
+	_ = r.Decode(&req, "json")
+
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Account not found", nil, "")
+	}
+
+	// If PIN is not provided, generate a random one
+	pin := req.Pin
+	if pin == "" {
+		pin = generateNumericPIN(6)
+	}
+
+	// Call Meta Register endpoint
+	if err := a.performRegistration(account.PhoneID, pin, account.AccessToken, account.APIVersion); err != nil {
+		a.Log.Error("Manual registration failed", "error", err)
+		return r.SendEnvelope(map[string]interface{}{
+			"success": false,
+			"error":   "Registration failed. Please verify the PIN.",
+		})
+	}
+
+	// Success
+	account.Status = "active"
+	account.Pin = pin // Save the PIN
+
+	if err := a.DB.Save(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account status", nil, "")
+	}
+
+	// Invalidate cache
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+
+	return r.SendEnvelope(map[string]interface{}{
+		"success": true,
+		"message": "Phone number registered successfully",
+		"pin":     pin, // Return PIN so frontend can show it one time if needed, or we rely on them getting it from DB later?
+		// Better not to return it if we generated it, OR return it so user knows it?
+		// We'll show it in the UI "Saved PIN: XXXXXX".
+	})
+}
+
+// subscribeAppToWABA subscribes the app to the WABA's webhooks
+func (a *App) subscribeAppToWABA(wabaID, accessToken string) error {
+	url := fmt.Sprintf("%s/%s/%s/subscribed_apps",
+		a.Config.WhatsApp.BaseURL, a.Config.WhatsApp.APIVersion, wabaID)
+
+	// POST request to subscribe
+	req, _ := http.NewRequest("POST", url, nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := a.WhatsApp.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("subscribe failed: %s", string(body))
+	}
+
+	return nil
+}
+
+func generateNumericPIN(length int) string {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "123456" // Fallback
+	}
+	for i := range b {
+		b[i] = (b[i] % 10) + '0'
+	}
+	return string(b)
 }
 
 // Helper functions
@@ -443,6 +588,7 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		HasAppSecret:       acc.AppSecret != "",
 		CreatedAt:          acc.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:          acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		Pin:                acc.Pin,
 	}
 }
 

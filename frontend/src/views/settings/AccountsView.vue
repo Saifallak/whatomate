@@ -78,6 +78,7 @@ interface WhatsAppAccount {
   display_name?: string
   created_at: string
   updated_at: string
+  pin?: string
 }
 
 interface TestResult {
@@ -253,13 +254,12 @@ window.addEventListener('message', (event) => {
 const pendingSignupData = ref<{phone_number_id: string, waba_id: string} | null>(null)
 
 // Updated exchange function
+const needsPin = ref(false)
+const userPin = ref('')
+const registeringAccountId = ref<string | null>(null)
+
 async function finishSignup(code: string) {
     if (!pendingSignupData.value) {
-       // It's possible we have the code but not the event data yet? or vice versa?
-       // Usually the event fires, then we close the window/popup?
-       // Actually FB.login popup handles itself.
-       // Let's optimistically hope we have the data or wait for it.
-       // For now, let's just error if missing.
        toast.error('Missing signup data (phone ID). Please try again.')
        return
     }
@@ -273,8 +273,14 @@ async function finishSignup(code: string) {
             name: 'New WhatsApp Account', // User can rename later
         }
 
-        await api.post('/accounts/exchange-token', payload)
+        const response = await api.post('/accounts/exchange-token', payload)
         toast.success('WhatsApp account connected successfully!')
+        
+        // Auto-register phone (Two-Step Verification)
+        if (response.data.data?.id) {
+           await registerPhone(response.data.data.id)
+        }
+        
         await fetchAccounts()
     } catch (error: any) {
         toast.error(error.response?.data?.message || 'Failed to connect account')
@@ -282,6 +288,38 @@ async function finishSignup(code: string) {
         isLoading.value = false
         pendingSignupData.value = null
     }
+}
+
+async function registerPhone(accountId: string, pin?: string) {
+  try {
+    const payload = pin ? { pin } : {}
+    const response = await api.post(`/accounts/${accountId}/register`, payload)
+    
+    if (response.data.data?.success) {
+       toast.success('Phone number registered for WhatsApp API!')
+       needsPin.value = false
+       userPin.value = ''
+       registeringAccountId.value = null
+       await fetchAccounts()
+    } else {
+       // Should be caught by catch block if status != 200, 
+       // but if backend returns 200 with success=false (custom envelope), check here.
+       throw new Error(response.data.data?.error || 'Registration failed')
+    }
+  } catch (error: any) {
+     console.error('Registration error:', error)
+     // If error indicates PIN issue (user needs to enter existing PIN)
+     // We assume any error here *might* be PIN related if it's "MessagingVerificationCodeMismatch" or similar.
+     // For simplicity, we'll prompt user for PIN on failure.
+     
+     if (!pin) { // Only prompt if we haven't manually tried a PIN yet (i.e., failed on auto-gen)
+         needsPin.value = true
+         registeringAccountId.value = accountId
+         toast.warning('This number is already protected by a PIN. Please enter it to continue.')
+     } else {
+         toast.error('Registration failed. Please verify your PIN and try again.')
+     }
+  }
 }
 
 const formData = ref({
@@ -447,6 +485,8 @@ function getStatusBadgeClass(status: string) {
   switch (status) {
     case 'active':
       return 'bg-green-900 text-green-300 light:bg-green-100 light:text-green-800'
+    case 'pending_registration':
+      return 'bg-yellow-900 text-yellow-300 light:bg-yellow-100 light:text-yellow-800'
     case 'inactive':
       return 'bg-gray-800 text-gray-300 light:bg-gray-100 light:text-gray-800'
     case 'error':
@@ -567,10 +607,14 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
                     <span :class="['px-2 py-0.5 text-xs font-medium rounded-full', getStatusBadgeClass(account.status)]">
                       {{ account.status }}
                     </span>
+                    <span v-if="account.status === 'pending_registration'" class="text-xs text-yellow-500 flex items-center gap-1">
+                       <AlertCircle class="h-3 w-3" /> Needs Registration
+                       <Button variant="link" size="sm" class="h-auto p-0 text-yellow-400" @click="registerPhone(account.id)">Retry</Button>
+                    </span>
                   </div>
 
                   <!-- Test Result -->
-                  <div v-if="testResults[account.id]" class="mt-2">
+                  <div v-if="testResults[account.id]" class="mt-2 text-sm">
                     <div v-if="testResults[account.id].success" class="flex items-center gap-2 text-green-400 light:text-green-600">
                       <CheckCircle2 class="h-4 w-4" />
                       <span class="text-sm font-medium">Connected</span>
