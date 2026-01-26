@@ -355,6 +355,7 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 }
 
 // ExchangeToken exchanges the temporary code for a permanent access token and creates the account
+// ExchangeToken exchanges the temporary code for a permanent access token and creates the account
 func (a *App) ExchangeToken(r *fastglue.Request) error {
 	orgID, err := getOrganizationID(r)
 	if err != nil {
@@ -411,7 +412,14 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	}
 
 	if req.Name == "" {
-		req.Name = "WhatsApp Account " + req.PhoneID[len(req.PhoneID)-4:]
+		// Try to fetch name from Meta
+		metaName, err := a.fetchPhoneNumberName(req.PhoneID, tokenResp.AccessToken)
+		if err == nil && metaName != "" {
+			// Append 4 random digits to avoid duplicates
+			req.Name = fmt.Sprintf("%s %s", metaName, generateNumericPIN(4))
+		} else {
+			req.Name = "WhatsApp Account " + req.PhoneID[len(req.PhoneID)-4:]
+		}
 	}
 
 	// Generate verify token if needed
@@ -441,14 +449,8 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		account.AutoReadReceipt = false
 	}
 
-	// 3. Subscribe app to WABA webhooks
-	if err := a.subscribeAppToWABA(req.WABAID, tokenResp.AccessToken); err != nil {
-		a.Log.Error("Failed to subscribe app to WABA", "error", err)
-	}
-
-	// 4. Attempt Auto-Registration with random PIN
-	// This is the "Happy Path". If it fails (e.g. existing PIN), we leave status as pending_registration
-	// and let the user handle it in frontend.
+	// 3. Attempt Auto-Registration with random PIN
+	// We do this BEFORE subscribing so the phone is "ready" (User suggestion/Hypothesis check)
 	generatedPin := generateNumericPIN(6)
 	regErr := a.performRegistration(account.PhoneID, generatedPin, tokenResp.AccessToken, account.APIVersion)
 
@@ -456,13 +458,19 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		account.Status = "active"
 		account.Pin = generatedPin
 	} else {
-		a.Log.Warn("Auto-registration failed (likely existing PIN)", "error", regErr)
+		a.Log.Warn("Auto-registration failed (likely existing PIN or permissions)", "error", regErr)
 		account.Status = "pending_registration"
+	}
+
+	// 4. Subscribe app to WABA webhooks
+	// Now that we attempted registration, let's link the app.
+	if err := a.subscribeAppToWABA(req.WABAID, tokenResp.AccessToken); err != nil {
+		a.Log.Error("Failed to subscribe app to WABA", "error", err)
 	}
 
 	if err := a.DB.Save(&account).Error; err != nil {
 		a.Log.Error("Failed to save account", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account: "+err.Error(), nil, "")
 	}
 
 	// Invalidate cache
@@ -537,7 +545,7 @@ func (a *App) RegisterPhone(r *fastglue.Request) error {
 		a.Log.Error("Manual registration failed", "error", err)
 		return r.SendEnvelope(map[string]interface{}{
 			"success": false,
-			"error":   "Registration failed. Please verify the PIN.",
+			"error":   "Registration failed: " + err.Error(),
 		})
 	}
 
@@ -616,6 +624,38 @@ func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 		UpdatedAt:          acc.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		Pin:                acc.Pin,
 	}
+}
+
+func (a *App) fetchPhoneNumberName(phoneID, accessToken string) (string, error) {
+	url := fmt.Sprintf("%s/%s/%s?fields=verified_name,display_phone_number",
+		a.Config.WhatsApp.BaseURL, a.Config.WhatsApp.APIVersion, phoneID)
+
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := a.WhatsApp.HTTPClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("failed to fetch phone details: %s", resp.Status)
+	}
+
+	var body struct {
+		VerifiedName       string `json:"verified_name"`
+		DisplayPhoneNumber string `json:"display_phone_number"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", err
+	}
+
+	if body.VerifiedName != "" {
+		return body.VerifiedName, nil
+	}
+	return body.DisplayPhoneNumber, nil
 }
 
 func generateVerifyToken() string {
