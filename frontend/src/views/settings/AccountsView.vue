@@ -57,7 +57,8 @@ import {
   ExternalLink,
   AlertCircle,
   CheckCircle2,
-  Settings2
+  Settings2,
+  HelpCircle
 } from 'lucide-vue-next'
 
 interface WhatsAppAccount {
@@ -262,7 +263,6 @@ async function finishSignup(code: string) {
             code: code,
             phone_id: pendingSignupData.value.phone_number_id,
             waba_id: pendingSignupData.value.waba_id,
-            name: 'New WhatsApp Account', // User can rename later
         }
 
         const response = await api.post('/accounts/exchange-token', payload)
@@ -300,19 +300,65 @@ async function registerPhone(accountId: string, pin?: string) {
     }
   } catch (error: any) {
      console.error('Registration error:', error)
-     // If error indicates PIN issue (user needs to enter existing PIN)
-     // We assume any error here *might* be PIN related if it's "MessagingVerificationCodeMismatch" or similar.
-     // For simplicity, we'll prompt user for PIN on failure.
+     const errorMsg = error.response?.data?.data?.error || error.response?.data?.message || error.message || 'Registration failed'
      
-     if (!pin) { // Only prompt if we haven't manually tried a PIN yet (i.e., failed on auto-gen)
-         console.log('Opening PIN dialog for account:', accountId) // Debug log
-         needsPin.value = true
-         registeringAccountId.value = accountId
-         toast.warning('This number is already protected by a PIN. Please enter it to continue.')
+     if (!pin) { 
+         const friendlyMsg = getFriendlyErrorMessage(errorMsg)
+         toast.error(friendlyMsg)
+         
+         const isPinError = checkIsPinError(errorMsg)
+         
+         if (isPinError) {
+             console.log('Opening PIN dialog due to PIN-related error')
+             needsPin.value = true
+             registeringAccountId.value = accountId
+         }
      } else {
-         toast.error('Registration failed. Please verify your PIN and try again.')
+         const friendlyMsg = getFriendlyErrorMessage(errorMsg)
+         toast.error(friendlyMsg)
      }
   }
+}
+
+function checkIsPinError(msg: string) {
+    const m = msg.toLowerCase()
+    return m.includes('pin') || m.includes('two-step') || m.includes('verification code') || m.includes('136024')
+}
+
+function getFriendlyErrorMessage(rawMsg: string): string {
+  // Rate Limit (133016)
+  if (rawMsg.includes('133016') || rawMsg.includes('too many attempts')) {
+    return 'Too many registration attempts. Please wait 5-10 minutes and try again.'
+  }
+  
+  // Account Status / Linking (#100)
+  if (rawMsg.includes('(#100)') || rawMsg.includes('non-approved') || rawMsg.includes('pending Whatsapp business')) {
+    return 'Meta Business Account Not Ready. Please check "Business Settings" in Meta to ensure your account is approved and has a payment method.'
+  }
+  
+  // PIN Error (136024)
+  if (rawMsg.includes('136024') || rawMsg.includes('mismatch')) {
+     return 'Incorrect PIN. Please try again.'
+  }
+  
+  // Generic cleanup: Remove "Registration failed: registration API failed: " clutter
+  if (rawMsg.includes('{')) {
+      // Try to extract just the message from JSON if parsing fails or fallback
+      try {
+          // Attempt to find JSON part
+          const jsonStart = rawMsg.indexOf('{')
+          const jsonEnd = rawMsg.lastIndexOf('}')
+          if (jsonStart > -1 && jsonEnd > jsonStart) {
+              const jsonStr = rawMsg.substring(jsonStart, jsonEnd + 1)
+              const parsed = JSON.parse(jsonStr)
+              if (parsed.error && parsed.error.message) {
+                  return parsed.error.message
+              }
+          }
+      } catch (e) {/* ignore */}
+  }
+
+  return rawMsg
 }
 
 const formData = ref({
@@ -483,15 +529,39 @@ function copyToClipboard(text: string, label: string) {
 function getStatusBadgeClass(status: string) {
   switch (status) {
     case 'active':
-      return 'bg-green-900 text-green-300 light:bg-green-100 light:text-green-800'
+      return 'bg-green-500/10 text-green-400 border border-green-500/20'
     case 'pending_registration':
-      return 'bg-yellow-900 text-yellow-300 light:bg-yellow-100 light:text-yellow-800'
+      return 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'
     case 'inactive':
-      return 'bg-gray-800 text-gray-300 light:bg-gray-100 light:text-gray-800'
-    case 'error':
-      return 'bg-red-900 text-red-300 light:bg-red-100 light:text-red-800'
+      return 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
     default:
-      return 'bg-yellow-900 text-yellow-300 light:bg-yellow-100 light:text-yellow-800'
+      return 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+  }
+}
+
+function getStatusLabel(status: string) {
+  switch (status) {
+    case 'active':
+      return 'Active'
+    case 'pending_registration':
+      return 'Action Required'
+    case 'inactive':
+      return 'Inactive'
+    default:
+      return status?.charAt(0).toUpperCase() + status?.slice(1) || 'Unknown'
+  }
+}
+
+function getStatusDescription(status: string) {
+  switch (status) {
+    case 'active':
+      return 'Account is fully connected and ready to send/receive messages.'
+    case 'pending_registration':
+      return 'Wait! The phone number is not fully registered with Meta yet. You may need to enter a PIN or fix account issues in Meta Business Manager.'
+    case 'inactive':
+      return 'Account is disabled. No messages will be processed.'
+    default:
+      return 'Account status is unknown.'
   }
 }
 
@@ -603,16 +673,36 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
                 <div class="min-w-0">
                   <div class="flex items-center gap-2 flex-wrap">
                     <h3 class="font-semibold text-lg text-white light:text-gray-900">{{ account.name }}</h3>
-                    <span :class="['px-2 py-0.5 text-xs font-medium rounded-full', getStatusBadgeClass(account.status)]">
-                      {{ account.status }}
-                    </span>
-                    <span v-if="account.status === 'pending_registration'" class="text-xs text-yellow-500 flex items-center gap-1">
-                       <AlertCircle class="h-3 w-3" /> Needs Registration
-                       <Button variant="link" size="sm" class="h-auto p-0 text-yellow-400" @click="registerPhone(account.id)">Retry</Button>
-                    </span>
+                    
+                    <!-- Status Badge with Tooltip -->
+                    <div class="flex items-center gap-2">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger as-child>
+                              <div class="flex items-center gap-1 cursor-help">
+                                <span :class="['px-2 py-0.5 text-xs font-medium rounded-full flex items-center gap-1', getStatusBadgeClass(account.status)]">
+                                  {{ getStatusLabel(account.status) }}
+                                  <HelpCircle class="h-3 w-3 opacity-70" />
+                                </span>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p class="max-w-[200px] text-xs">{{ getStatusDescription(account.status) }}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                    </div>
                   </div>
 
-                  <!-- Test Result -->
+                  <!-- Retry Action for Verification -->
+                   <div v-if="account.status === 'pending_registration'" class="mt-2 flex items-center gap-2 bg-yellow-950/30 p-2 rounded border border-yellow-900/50">
+                       <AlertCircle class="h-4 w-4 text-yellow-500" />
+                       <span class="text-xs text-yellow-200">Registration incomplete.</span>
+                       <Button variant="secondary" size="sm" class="h-6 text-xs ml-auto" @click="registerPhone(account.id)">
+                         Verify & Retry
+                       </Button>
+                   </div>
+
                   <div v-if="testResults[account.id]" class="mt-2 text-sm">
                     <div v-if="testResults[account.id].success" class="flex items-center gap-2 text-green-400 light:text-green-600">
                       <CheckCircle2 class="h-4 w-4" />
@@ -750,7 +840,7 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
           <CardContent class="p-6">
             <h3 class="font-semibold flex items-center gap-2 mb-4">
               <Settings2 class="h-5 w-5" />
-              Setup Guide
+              Manuel Entry Guide
             </h3>
             <ol class="list-decimal list-inside space-y-3 text-sm text-muted-foreground">
               <li>
