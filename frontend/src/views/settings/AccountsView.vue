@@ -139,15 +139,12 @@ const loadFacebookSDK = () => {
 }
 
 const initFacebook = async () => {
-  console.log('Initializing Facebook SDK...')
   await loadFacebookSDK()
 
   const checkFB = setInterval(() => {
     if (window.FB) {
       clearInterval(checkFB)
-      console.log('Facebook SDK loaded, calling init...')
       const appId = import.meta.env.VITE_WHATSAPP_APP_ID || ''
-      console.log('Using App ID:', appId)
 
       window.FB.init({
         appId            : appId,
@@ -155,9 +152,6 @@ const initFacebook = async () => {
         xfbml            : true,
         version          : 'v21.0'
       })
-      console.log('Facebook SDK initialized successfully')
-    } else {
-      console.log('Waiting for window.FB...')
     }
   }, 100)
 }
@@ -195,8 +189,6 @@ async function launchWhatsAppSignup() {
          // Let's assume we get a code.
          toast.error('No code received from Facebook')
       }
-    } else {
-      console.log('User cancelled login or did not fully authorize.')
     }
   }, {
     config_id: configId,
