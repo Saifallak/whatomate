@@ -138,20 +138,25 @@ const loadFacebookSDK = () => {
 }
 
 const initFacebook = async () => {
+  console.log('Initializing Facebook SDK...')
   await loadFacebookSDK()
-  
-  // We need the App ID from backend ideally, or env.
-  // Assuming 123456789 for now, should be replaced by real ID
-  // Wait for SDK to be ready
+
   const checkFB = setInterval(() => {
     if (window.FB) {
       clearInterval(checkFB)
+      console.log('Facebook SDK loaded, calling init...')
+      const appId = import.meta.env.VITE_WHATSAPP_APP_ID || ''
+      console.log('Using App ID:', appId)
+
       window.FB.init({
-        appId            : import.meta.env.VITE_WHATSAPP_APP_ID || '', // Needs to be in .env
+        appId            : appId,
         autoLogAppEvents : true,
         xfbml            : true,
         version          : 'v21.0'
       })
+      console.log('Facebook SDK initialized successfully')
+    } else {
+      console.log('Waiting for window.FB...')
     }
   }, 100)
 }
@@ -168,7 +173,7 @@ async function launchWhatsAppSignup() {
   }
 
   // The Config ID for the Embedded Signup flow
-  const configId = import.meta.env.VITE_WHATSAPP_CONFIG_ID || '' 
+  const configId = import.meta.env.VITE_WHATSAPP_CONFIG_ID || ''
 
   if (!configId) {
     toast.error('WhatsApp Configuration ID is missing in environment variables')
@@ -178,13 +183,13 @@ async function launchWhatsAppSignup() {
   window.FB.login(async (response: any) => {
     if (response.authResponse) {
       const { accessToken, userID, code } = response.authResponse
-      
+
       // If we used "response_type: 'code'", we get a code.
       // For embedded signup, usually we get a code to exchange.
       if (code) {
         await exchangeCodeForToken(code)
       } else {
-         // Sometimes it returns accessToken directly if configured that way, 
+         // Sometimes it returns accessToken directly if configured that way,
          // but for system user token exchange we usually want code.
          // Let's assume we get a code.
          toast.error('No code received from Facebook')
@@ -195,7 +200,7 @@ async function launchWhatsAppSignup() {
   }, {
     config_id: configId,
     response_type: 'code',
-    override_default_response_type: true, 
+    override_default_response_type: true,
     extras: {
       sessionInfoVersion: 2,
     }
@@ -205,10 +210,10 @@ async function launchWhatsAppSignup() {
 async function exchangeCodeForToken(code: string) {
   // Wait a moment for the message event to populate pendingSignupData
   // because the message event might fire slightly after or before the callback
-  
+
   let attempts = 0
   const maxAttempts = 20 // 2 seconds timeout
-  
+
   const checkData = setInterval(async () => {
     attempts++
     if (pendingSignupData.value) {
@@ -230,7 +235,7 @@ window.addEventListener('message', (event) => {
    if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") {
      return;
    }
-   
+
    try {
      const data = JSON.parse(event.data);
      if (data.type === 'WA_EMBEDDED_SIGNUP') {
@@ -267,7 +272,7 @@ async function finishSignup(code: string) {
             waba_id: pendingSignupData.value.waba_id,
             name: 'New WhatsApp Account', // User can rename later
         }
-        
+
         await api.post('/accounts/exchange-token', payload)
         toast.success('WhatsApp account connected successfully!')
         await fetchAccounts()
