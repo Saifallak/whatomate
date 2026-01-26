@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nyaruka/phonenumbers"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -35,6 +36,7 @@ type ContactResponse struct {
 	LastMessagePreview string     `json:"last_message_preview"`
 	UnreadCount        int        `json:"unread_count"`
 	AssignedUserID     *uuid.UUID `json:"assigned_user_id,omitempty"`
+	WhatsAppAccount    string     `json:"whatsapp_account,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
@@ -86,6 +88,8 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	page, _ := strconv.Atoi(string(r.RequestCtx.QueryArgs().Peek("page")))
 	limit, _ := strconv.Atoi(string(r.RequestCtx.QueryArgs().Peek("limit")))
 	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+	phoneNumber := string(r.RequestCtx.QueryArgs().Peek("phone_number"))
+	whatsappAccount := string(r.RequestCtx.QueryArgs().Peek("whatsapp_account"))
 
 	if page < 1 {
 		page = 1
@@ -106,6 +110,16 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	if search != "" {
 		searchPattern := "%" + search + "%"
 		query = query.Where("phone_number LIKE ? OR profile_name LIKE ?", searchPattern, searchPattern)
+	}
+
+	// Strict filters
+	if phoneNumber != "" {
+		// Strip + if present
+		phoneNumber = strings.TrimPrefix(phoneNumber, "+")
+		query = query.Where("phone_number = ?", phoneNumber)
+	}
+	if whatsappAccount != "" {
+		query = query.Where("whats_app_account = ?", whatsappAccount)
 	}
 
 	// Order by last message time (most recent first)
@@ -159,6 +173,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			LastMessagePreview: c.LastMessagePreview,
 			UnreadCount:        int(unreadCount),
 			AssignedUserID:     c.AssignedUserID,
+			WhatsAppAccount:    c.WhatsAppAccount,
 			CreatedAt:          c.CreatedAt,
 			UpdatedAt:          c.UpdatedAt,
 		}
@@ -231,6 +246,7 @@ func (a *App) GetContact(r *fastglue.Request) error {
 		LastMessagePreview: contact.LastMessagePreview,
 		UnreadCount:        int(unreadCount),
 		AssignedUserID:     contact.AssignedUserID,
+		WhatsAppAccount:    contact.WhatsAppAccount,
 		CreatedAt:          contact.CreatedAt,
 		UpdatedAt:          contact.UpdatedAt,
 	}
@@ -482,11 +498,11 @@ type SendMessageRequest struct {
 
 // InteractiveContent holds interactive message data
 type InteractiveContent struct {
-	Type       string           `json:"type"`                  // "button", "list", "cta_url"
-	Body       string           `json:"body"`                  // Body text
-	Buttons    []ButtonContent  `json:"buttons,omitempty"`     // For button type
-	ButtonText string           `json:"button_text,omitempty"` // For cta_url type
-	URL        string           `json:"url,omitempty"`         // For cta_url type
+	Type       string          `json:"type"`                  // "button", "list", "cta_url"
+	Body       string          `json:"body"`                  // Body text
+	Buttons    []ButtonContent `json:"buttons,omitempty"`     // For button type
+	ButtonText string          `json:"button_text,omitempty"` // For cta_url type
+	URL        string          `json:"url,omitempty"`         // For cta_url type
 }
 
 // ButtonContent represents a button in interactive messages
@@ -1153,5 +1169,91 @@ func (a *App) GetContactSessionData(r *fastglue.Request) error {
 		}
 	}
 
+	return r.SendEnvelope(response)
+}
+
+// CreateContactRequest represents the request body for creating a contact
+type CreateContactRequest struct {
+	PhoneNumber     string `json:"phone_number"`
+	Name            string `json:"name"`
+	WhatsAppAccount string `json:"whatsapp_account"`
+}
+
+// CreateContact creates a new contact or returns an existing one
+func (a *App) CreateContact(r *fastglue.Request) error {
+	orgID, err := getOrganizationID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	var req CreateContactRequest
+	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+
+	if req.PhoneNumber == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Phone number is required", nil, "")
+	}
+
+	// Validate phone number
+	// Use Parse with empty region, assuming international format or prepended +
+	numToParse := req.PhoneNumber
+	if !strings.HasPrefix(numToParse, "+") {
+		numToParse = "+" + numToParse
+	}
+
+	num, err := phonenumbers.Parse(numToParse, "")
+	if err != nil {
+		a.Log.Warn("Failed to parse phone number", "phone", req.PhoneNumber, "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid phone number format", nil, "")
+	}
+
+	if !phonenumbers.IsValidNumber(num) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid phone number", nil, "")
+	}
+
+	// Format to E.164 for storage consistency, then strip the +
+	e164 := phonenumbers.Format(num, phonenumbers.E164)
+	req.PhoneNumber = strings.TrimPrefix(e164, "+")
+
+	if req.WhatsAppAccount == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account is required", nil, "")
+	}
+
+	// Verify WhatsApp account exists for this org
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("organization_id = ? AND name = ?", orgID, req.WhatsAppAccount).First(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid WhatsApp account", nil, "")
+	}
+
+	// Use getOrCreateContact to handle existence check and creation logic
+	// This now respects the (Organization, Phone, Account) uniqueness tuple
+	contact, isNew := a.getOrCreateContact(orgID, req.PhoneNumber, req.Name, req.WhatsAppAccount)
+
+	// If Name provided and different, it updates it in getOrCreate.
+
+	response := ContactResponse{
+		ID:                 contact.ID,
+		PhoneNumber:        contact.PhoneNumber,
+		Name:               contact.ProfileName,
+		ProfileName:        contact.ProfileName,
+		Status:             "active",
+		Tags:               []string{}, // New/fetched contact tags... mostly empty if new
+		CustomFields:       contact.Metadata,
+		LastMessageAt:      contact.LastMessageAt,
+		LastMessagePreview: contact.LastMessagePreview,
+		UnreadCount:        0,
+		AssignedUserID:     contact.AssignedUserID,
+		WhatsAppAccount:    contact.WhatsAppAccount,
+		CreatedAt:          contact.CreatedAt,
+		UpdatedAt:          contact.UpdatedAt,
+	}
+
+	statusCode := fasthttp.StatusOK
+	if isNew {
+		statusCode = fasthttp.StatusCreated
+	}
+
+	r.RequestCtx.SetStatusCode(statusCode)
 	return r.SendEnvelope(response)
 }

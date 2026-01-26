@@ -48,7 +48,14 @@ export class ChatPage extends BasePage {
   }
 
   async selectContact(name: string) {
-    await this.page.locator('.contact-item, [data-testid="contact"]').filter({ hasText: name }).click()
+    // Try data-testid first, then fallback to generic robust selector
+    const contact = this.page.locator(`[data-testid="contact"]`).filter({ hasText: name })
+    if (await contact.count() > 0) {
+      await contact.first().click()
+    } else {
+      // Fallback similar to chat.spec.ts
+      await this.page.locator('.cursor-pointer').filter({ hasText: name }).first().click()
+    }
     await this.page.waitForLoadState('networkidle')
   }
 

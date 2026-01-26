@@ -8,9 +8,6 @@ import (
 // Stub handlers - not yet implemented
 
 // Contact handlers
-func (a *App) CreateContact(r *fastglue.Request) error {
-	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
-}
 
 func (a *App) UpdateContact(r *fastglue.Request) error {
 	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")

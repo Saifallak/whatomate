@@ -196,6 +196,9 @@ const contactTags = computed(() => {
             <Phone class="h-3 w-3" />
             <span>{{ contact.phone_number }}</span>
           </div>
+          <div v-if="contact.whatsapp_account" class="flex items-center gap-1 text-xs text-muted-foreground mt-1 bg-muted/50 px-2 py-0.5 rounded-full">
+            <span>Account: {{ contact.whatsapp_account }}</span>
+          </div>
         </div>
 
         <!-- No Session Data or no panel config -->

@@ -14,7 +14,6 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-
 // NewPostgres creates a new PostgreSQL connection
 func NewPostgres(cfg *config.DatabaseConfig, debug bool) (*gorm.DB, error) {
 	dsn := fmt.Sprintf(
@@ -213,7 +212,10 @@ func getIndexes() []string {
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,
+		// Drop old strictly unique index on phone number (migration)
+		`DROP INDEX IF EXISTS idx_contacts_org_phone`,
+		// Create new scoped unique index including account
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone_account ON contacts(organization_id, phone_number, whats_app_account)`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_assigned_read ON contacts(assigned_user_id, is_read)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_phone_status ON chatbot_sessions(organization_id, phone_number, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_keyword_rules_priority ON keyword_rules(organization_id, is_enabled, priority DESC)`,

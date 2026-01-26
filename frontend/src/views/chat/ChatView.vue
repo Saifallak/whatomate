@@ -78,7 +78,9 @@ import { getInitials } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
-import { Info } from 'lucide-vue-next'
+import TemplateMessageDialog from '@/components/chat/TemplateMessageDialog.vue'
+import { Info, AlertTriangle, Plus } from 'lucide-vue-next'
+import NewChatDialog from '@/views/chat/NewChatDialog.vue'
 
 // Avatar gradient colors - consistent per contact based on name hash
 const avatarGradients = [
@@ -149,6 +151,32 @@ const emojiPickerOpen = ref(false)
 // Custom actions state
 const customActions = ref<CustomAction[]>([])
 const executingActionId = ref<string | null>(null)
+
+// Template message dialog state
+const isTemplateDialogOpen = ref(false)
+const isNewChatDialogOpen = ref(false)
+
+
+// 24h window check - find last incoming message
+const lastIncomingMessage = computed(() => {
+  const messages = contactsStore.messages
+  // Iterate in reverse to find the most recent incoming message
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].direction === 'incoming') {
+      return messages[i]
+    }
+  }
+  return null
+})
+
+// Check if we're within the 24h messaging window
+const isWithin24Hours = computed(() => {
+  if (!lastIncomingMessage.value) return false
+  const lastMessageTime = new Date(lastIncomingMessage.value.created_at).getTime()
+  const now = Date.now()
+  const twentyFourHoursMs = 24 * 60 * 60 * 1000
+  return (now - lastMessageTime) < twentyFourHoursMs
+})
 
 const contactId = computed(() => route.params.contactId as string | undefined)
 
@@ -293,8 +321,8 @@ const filteredAssignableUsers = computed(() => {
   const query = assignSearchQuery.value.toLowerCase().trim()
   if (!query) return assignableUsers.value
   return assignableUsers.value.filter(u =>
-    u.full_name.toLowerCase().includes(query) ||
-    u.email.toLowerCase().includes(query)
+      u.full_name.toLowerCase().includes(query) ||
+      u.email.toLowerCase().includes(query)
   )
 })
 
@@ -352,7 +380,7 @@ function setupScrollListener() {
     // Find the scrollable viewport - it's the element with overflow:scroll/auto
     // Try data attributes first, then find by computed style
     scrollViewport = scrollArea.querySelector('[data-reka-scroll-area-viewport]') ||
-                     scrollArea.querySelector('[data-radix-scroll-area-viewport]')
+        scrollArea.querySelector('[data-radix-scroll-area-viewport]')
 
     if (!scrollViewport) {
       // Fallback: find child element that has overflow scroll/auto
@@ -518,10 +546,10 @@ async function sendMessage() {
   isSending.value = true
   try {
     await contactsStore.sendMessage(
-      contactsStore.currentContact.id,
-      'text',
-      { body: messageInput.value },
-      contactsStore.replyingTo?.id
+        contactsStore.currentContact.id,
+        'text',
+        { body: messageInput.value },
+        contactsStore.replyingTo?.id
     )
     messageInput.value = ''
     contactsStore.clearReplyingTo()
@@ -546,9 +574,9 @@ async function retryMessage(message: Message) {
     const content = message.content || {}
 
     await contactsStore.sendMessage(
-      contactsStore.currentContact.id,
-      message.message_type,
-      content
+        contactsStore.currentContact.id,
+        message.message_type,
+        content
     )
 
     // Remove the failed message from the list after successful retry
@@ -645,9 +673,9 @@ async function sendReaction(messageId: string, emoji: string) {
 
   try {
     const response = await messagesService.sendReaction(
-      contactsStore.currentContact.id,
-      messageId,
-      emoji
+        contactsStore.currentContact.id,
+        messageId,
+        emoji
     )
     // Update will come via WebSocket, but we can update locally for immediate feedback
     const data = response.data.data || response.data
@@ -1175,28 +1203,37 @@ async function sendMediaMessage() {
     <!-- Contacts List -->
     <div class="w-80 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
       <!-- Search Header -->
-      <div class="p-2 border-b border-white/[0.08] light:border-gray-200">
-        <div class="relative">
+      <div class="p-2 border-b border-white/[0.08] light:border-gray-200 flex gap-2">
+        <div class="relative flex-1">
           <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40 light:text-gray-400" />
           <Input
-            v-model="contactsStore.searchQuery"
-            placeholder="Search contacts..."
-            class="pl-8 h-8 text-sm bg-white/[0.04] border-white/[0.1] text-white placeholder:text-white/40 light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:placeholder:text-gray-400"
+              v-model="contactsStore.searchQuery"
+              placeholder="Search contacts..."
+              class="pl-8 h-8 text-sm bg-white/[0.04] border-white/[0.1] text-white placeholder:text-white/40 light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:placeholder:text-gray-400"
           />
         </div>
+        <Button
+            size="icon"
+            variant="ghost"
+            class="h-8 w-8 bg-white/[0.04] border border-white/[0.1] text-white hover:bg-white/[0.08] light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:hover:bg-gray-100"
+            @click="isNewChatDialogOpen = true"
+        >
+          <Plus class="h-4 w-4" />
+        </Button>
       </div>
 
       <!-- Contacts -->
       <ScrollArea class="flex-1">
         <div class="py-1">
           <div
-            v-for="contact in contactsStore.sortedContacts"
-            :key="contact.id"
-            :class="[
+              v-for="contact in contactsStore.sortedContacts"
+              :key="contact.id"
+              data-testid="contact"
+              :class="[
               'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
               contactsStore.currentContact?.id === contact.id && 'bg-white/[0.08] light:bg-gray-100'
             ]"
-            @click="handleContactClick(contact)"
+              @click="handleContactClick(contact)"
           >
             <Avatar class="h-9 w-9 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contact.avatar_url" />
@@ -1227,11 +1264,11 @@ async function sendMediaMessage() {
           <!-- Load more indicator -->
           <div v-if="contactsStore.hasMoreContacts" class="p-3 text-center">
             <Button
-              v-if="!contactsStore.isLoadingMoreContacts"
-              variant="ghost"
-              size="sm"
-              class="text-white/50 hover:text-white hover:bg-white/[0.04] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
-              @click="contactsStore.loadMoreContacts()"
+                v-if="!contactsStore.isLoadingMoreContacts"
+                variant="ghost"
+                size="sm"
+                class="text-white/50 hover:text-white hover:bg-white/[0.04] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+                @click="contactsStore.loadMoreContacts()"
             >
               Load more ({{ contactsStore.sortedContacts.length }} of {{ contactsStore.contactsTotal }})
             </Button>
@@ -1250,8 +1287,8 @@ async function sendMediaMessage() {
     <div class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50">
       <!-- No Contact Selected -->
       <div
-        v-if="!contactsStore.currentContact"
-        class="flex-1 flex items-center justify-center text-white/40 light:text-gray-500"
+          v-if="!contactsStore.currentContact"
+          class="flex-1 flex items-center justify-center text-white/40 light:text-gray-500"
       >
         <div class="text-center">
           <div class="h-16 w-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/20">
@@ -1266,6 +1303,7 @@ async function sendMediaMessage() {
       <template v-else>
         <!-- Chat Header -->
         <div class="h-14 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between bg-[#0f0f10] light:bg-white">
+          <!-- Standard Input Area -->
           <div class="flex items-center gap-2">
             <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
@@ -1308,11 +1346,11 @@ async function sendMediaMessage() {
             <Tooltip v-for="action in customActions" :key="action.id">
               <TooltipTrigger as-child>
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
-                  :disabled="executingActionId === action.id"
-                  @click="executeCustomAction(action)"
+                    variant="ghost"
+                    size="icon"
+                    class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+                    :disabled="executingActionId === action.id"
+                    @click="executeCustomAction(action)"
                 >
                   <Loader2 v-if="executingActionId === action.id" class="h-4 w-4 animate-spin" />
                   <component v-else :is="getActionIcon(action.icon)" class="h-4 w-4" />
@@ -1323,11 +1361,11 @@ async function sendMediaMessage() {
             <Tooltip>
               <TooltipTrigger as-child>
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
-                  :class="isInfoPanelOpen && 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'"
-                  @click="isInfoPanelOpen = !isInfoPanelOpen"
+                    variant="ghost"
+                    size="icon"
+                    class="h-8 w-8 text-white/50 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+                    :class="isInfoPanelOpen && 'bg-white/[0.08] text-white light:bg-gray-100 light:text-gray-900'"
+                    @click="isInfoPanelOpen = !isInfoPanelOpen"
                 >
                   <Info class="h-4 w-4" />
                 </Button>
@@ -1369,8 +1407,8 @@ async function sendMediaMessage() {
           <!-- Sticky date header -->
           <Transition name="sticky-date">
             <div
-              v-if="showStickyDate"
-              class="absolute top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 bg-white/[0.08] light:bg-gray-200 backdrop-blur-sm rounded-full text-[11px] text-white/50 light:text-gray-600 font-medium shadow-sm"
+                v-if="showStickyDate"
+                class="absolute top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 bg-white/[0.08] light:bg-gray-200 backdrop-blur-sm rounded-full text-[11px] text-white/50 light:text-gray-600 font-medium shadow-sm"
             >
               {{ stickyDate }}
             </div>
@@ -1386,347 +1424,347 @@ async function sendMediaMessage() {
                 </div>
               </div>
               <template
-                v-for="(message, index) in contactsStore.messages"
-                :key="message.id"
+                  v-for="(message, index) in contactsStore.messages"
+                  :key="message.id"
               >
                 <!-- Date separator -->
                 <div
-                  v-if="shouldShowDateSeparator(index)"
-                  class="flex items-center justify-center my-4"
-                  :data-date-separator="getDateLabel(message.created_at)"
+                    v-if="shouldShowDateSeparator(index)"
+                    class="flex items-center justify-center my-4"
+                    :data-date-separator="getDateLabel(message.created_at)"
                 >
                   <div class="px-3 py-1 bg-white/[0.06] light:bg-gray-200 rounded-full text-[11px] text-white/40 light:text-gray-600 font-medium">
                     {{ getDateLabel(message.created_at) }}
                   </div>
                 </div>
 
-              <!-- Message bubble -->
-              <div
-                :id="`message-${message.id}`"
-                :class="[
+                <!-- Message bubble -->
+                <div
+                    :id="`message-${message.id}`"
+                    :class="[
                   'flex group',
                   message.direction === 'outgoing' ? 'justify-end' : 'justify-start'
                 ]"
-              >
-              <div
-                :class="[
+                >
+                  <div
+                      :class="[
                   'chat-bubble',
                   message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming'
                 ]"
-              >
-                <!-- Reply preview (if this message is replying to another) -->
-                <div
-                  v-if="message.is_reply && message.reply_to_message"
-                  class="reply-preview cursor-pointer text-xs"
-                  @click="scrollToMessage(message.reply_to_message_id)"
-                >
-                  <p class="font-medium">
-                    {{ message.reply_to_message.direction === 'incoming' ? (contactsStore.currentContact?.profile_name || contactsStore.currentContact?.name || 'Customer') : 'You' }}
-                  </p>
-                  <p class="truncate">
-                    {{ getReplyPreviewContent(message) }}
-                  </p>
-                </div>
-                <!-- Image message -->
-                <div v-if="message.message_type === 'image' && message.media_url" class="mb-2">
-                  <div v-if="isMediaLoading(message)" class="w-[200px] h-[150px] bg-muted rounded-lg animate-pulse flex items-center justify-center">
-                    <span class="text-muted-foreground text-sm">Loading...</span>
-                  </div>
-                  <img
-                    v-else-if="getMediaBlobUrl(message)"
-                    :src="getMediaBlobUrl(message)"
-                    :alt="message.content?.body || 'Image'"
-                    class="max-w-[280px] max-h-[300px] rounded-lg cursor-pointer object-cover"
-                    @click="openMediaPreview(message)"
-                    @error="handleImageError($event)"
-                  />
-                  <div v-else class="w-[200px] h-[150px] bg-muted rounded-lg flex items-center justify-center">
-                    <span class="text-muted-foreground text-sm">[Image]</span>
-                  </div>
-                </div>
-                <!-- Sticker message -->
-                <div v-else-if="message.message_type === 'sticker' && message.media_url" class="mb-2">
-                  <div v-if="isMediaLoading(message)" class="w-[128px] h-[128px] bg-muted rounded-lg animate-pulse flex items-center justify-center">
-                    <span class="text-muted-foreground text-sm">Loading...</span>
-                  </div>
-                  <img
-                    v-else-if="getMediaBlobUrl(message)"
-                    :src="getMediaBlobUrl(message)"
-                    alt="Sticker"
-                    class="max-w-[128px] max-h-[128px] cursor-pointer"
-                    @click="openMediaPreview(message)"
-                    @error="handleImageError($event)"
-                  />
-                  <div v-else class="w-[128px] h-[128px] bg-muted rounded-lg flex items-center justify-center">
-                    <span class="text-muted-foreground text-sm">[Sticker]</span>
-                  </div>
-                </div>
-                <!-- Video message -->
-                <div v-else-if="message.message_type === 'video' && message.media_url" class="mb-2">
-                  <div v-if="isMediaLoading(message)" class="w-[200px] h-[150px] bg-muted rounded-lg animate-pulse flex items-center justify-center">
-                    <span class="text-muted-foreground text-sm">Loading...</span>
-                  </div>
-                  <video
-                    v-else-if="getMediaBlobUrl(message)"
-                    :src="getMediaBlobUrl(message)"
-                    controls
-                    class="max-w-[280px] max-h-[300px] rounded-lg"
-                    @error="handleMediaError($event, 'video')"
-                  />
-                  <div v-else class="w-[200px] h-[150px] bg-muted rounded-lg flex items-center justify-center">
-                    <span class="text-muted-foreground text-sm">[Video]</span>
-                  </div>
-                </div>
-                <!-- Audio message -->
-                <div v-else-if="message.message_type === 'audio' && message.media_url" class="mb-2">
-                  <div v-if="isMediaLoading(message)" class="w-[200px] h-[40px] bg-muted rounded-lg animate-pulse"></div>
-                  <audio
-                    v-else-if="getMediaBlobUrl(message)"
-                    :src="getMediaBlobUrl(message)"
-                    controls
-                    class="max-w-[280px]"
-                    @error="handleMediaError($event, 'audio')"
-                  />
-                  <div v-else class="text-muted-foreground text-sm">[Audio]</div>
-                </div>
-                <!-- Document message -->
-                <div v-else-if="message.message_type === 'document' && message.media_url" class="mb-2">
-                  <a
-                    v-if="getMediaBlobUrl(message)"
-                    :href="getMediaBlobUrl(message)"
-                    :download="message.media_filename || 'document'"
-                    class="flex items-center gap-2 px-3 py-2 bg-background/50 rounded-lg hover:bg-background/80 transition-colors"
                   >
-                    <FileText class="h-5 w-5 text-muted-foreground" />
-                    <span class="text-sm truncate max-w-[200px]">
-                      {{ message.media_filename || 'Document' }}
-                    </span>
-                  </a>
-                  <div v-else-if="isMediaLoading(message)" class="flex items-center gap-2 px-3 py-2 bg-background/50 rounded-lg">
-                    <FileText class="h-5 w-5 text-muted-foreground" />
-                    <span class="text-sm text-muted-foreground">Loading...</span>
-                  </div>
-                  <div v-else class="flex items-center gap-2 px-3 py-2 bg-background/50 rounded-lg">
-                    <FileText class="h-5 w-5 text-muted-foreground" />
-                    <span class="text-sm text-muted-foreground">[Document]</span>
-                  </div>
-                </div>
-                <!-- Location message -->
-                <div v-else-if="message.message_type === 'location' && getLocationData(message)" class="mb-2">
-                  <a
-                    :href="getGoogleMapsUrl(getLocationData(message)!)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="flex items-center gap-3 px-3 py-3 bg-background/50 rounded-lg hover:bg-background/80 transition-colors"
-                  >
-                    <div class="h-10 w-10 rounded-full bg-red-900/30 light:bg-red-100 flex items-center justify-center shrink-0">
-                      <MapPin class="h-5 w-5 text-red-500" />
-                    </div>
-                    <div class="flex-1 min-w-0">
-                      <p v-if="getLocationData(message)?.name" class="text-sm font-medium truncate">
-                        {{ getLocationData(message)?.name }}
+                    <!-- Reply preview (if this message is replying to another) -->
+                    <div
+                        v-if="message.is_reply && message.reply_to_message"
+                        class="reply-preview cursor-pointer text-xs"
+                        @click="scrollToMessage(message.reply_to_message_id)"
+                    >
+                      <p class="font-medium">
+                        {{ message.reply_to_message.direction === 'incoming' ? (contactsStore.currentContact?.profile_name || contactsStore.currentContact?.name || 'Customer') : 'You' }}
                       </p>
-                      <p v-else class="text-sm font-medium">Location</p>
-                      <p v-if="getLocationData(message)?.address" class="text-xs text-muted-foreground truncate">
-                        {{ getLocationData(message)?.address }}
-                      </p>
-                      <p class="text-xs text-muted-foreground">
-                        {{ getLocationData(message)?.latitude.toFixed(6) }}, {{ getLocationData(message)?.longitude.toFixed(6) }}
+                      <p class="truncate">
+                        {{ getReplyPreviewContent(message) }}
                       </p>
                     </div>
-                    <ExternalLink class="h-4 w-4 text-muted-foreground shrink-0" />
-                  </a>
-                </div>
-                <!-- Contacts message -->
-                <div v-else-if="message.message_type === 'contacts' && getContactsData(message).length > 0" class="mb-2 space-y-2">
-                  <div
-                    v-for="(contact, idx) in getContactsData(message)"
-                    :key="idx"
-                    class="flex items-center gap-3 px-3 py-2 bg-background/50 rounded-lg"
-                  >
-                    <div class="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <User class="h-5 w-5 text-primary" />
-                    </div>
-                    <div class="flex-1 min-w-0">
-                      <p class="text-sm font-medium truncate">{{ contact.name }}</p>
-                      <div v-if="contact.phones?.length" class="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Phone class="h-3 w-3" />
-                        <span class="truncate">{{ contact.phones.join(', ') }}</span>
+                    <!-- Image message -->
+                    <div v-if="message.message_type === 'image' && message.media_url" class="mb-2">
+                      <div v-if="isMediaLoading(message)" class="w-[200px] h-[150px] bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                        <span class="text-muted-foreground text-sm">Loading...</span>
+                      </div>
+                      <img
+                          v-else-if="getMediaBlobUrl(message)"
+                          :src="getMediaBlobUrl(message)"
+                          :alt="message.content?.body || 'Image'"
+                          class="max-w-[280px] max-h-[300px] rounded-lg cursor-pointer object-cover"
+                          @click="openMediaPreview(message)"
+                          @error="handleImageError($event)"
+                      />
+                      <div v-else class="w-[200px] h-[150px] bg-muted rounded-lg flex items-center justify-center">
+                        <span class="text-muted-foreground text-sm">[Image]</span>
                       </div>
                     </div>
-                  </div>
-                </div>
-                <!-- Unsupported message -->
-                <div v-else-if="message.message_type === 'unsupported'" class="mb-2">
-                  <div class="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-lg text-muted-foreground">
-                    <AlertCircle class="h-4 w-4 shrink-0" />
-                    <span class="text-sm italic">This message type is not supported</span>
-                  </div>
-                </div>
-                <!-- Button reply - WhatsApp style -->
-                <div v-if="message.message_type === 'button_reply'" class="button-reply-bubble">
-                  <span class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}</span>
-                  <span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span></span>
-                </div>
-                <!-- Text content (for text messages or captions) -->
-                <span v-else-if="getMessageContent(message)" class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
-                <!-- Fallback for media without URL -->
-                <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
-                <!-- Interactive buttons - WhatsApp style -->
-                <div
-                  v-if="getInteractiveButtons(message).length > 0"
-                  class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t"
-                >
-                  <div
-                    v-for="(btn, index) in getInteractiveButtons(message)"
-                    :key="btn.id"
-                    :class="[
+                    <!-- Sticker message -->
+                    <div v-else-if="message.message_type === 'sticker' && message.media_url" class="mb-2">
+                      <div v-if="isMediaLoading(message)" class="w-[128px] h-[128px] bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                        <span class="text-muted-foreground text-sm">Loading...</span>
+                      </div>
+                      <img
+                          v-else-if="getMediaBlobUrl(message)"
+                          :src="getMediaBlobUrl(message)"
+                          alt="Sticker"
+                          class="max-w-[128px] max-h-[128px] cursor-pointer"
+                          @click="openMediaPreview(message)"
+                          @error="handleImageError($event)"
+                      />
+                      <div v-else class="w-[128px] h-[128px] bg-muted rounded-lg flex items-center justify-center">
+                        <span class="text-muted-foreground text-sm">[Sticker]</span>
+                      </div>
+                    </div>
+                    <!-- Video message -->
+                    <div v-else-if="message.message_type === 'video' && message.media_url" class="mb-2">
+                      <div v-if="isMediaLoading(message)" class="w-[200px] h-[150px] bg-muted rounded-lg animate-pulse flex items-center justify-center">
+                        <span class="text-muted-foreground text-sm">Loading...</span>
+                      </div>
+                      <video
+                          v-else-if="getMediaBlobUrl(message)"
+                          :src="getMediaBlobUrl(message)"
+                          controls
+                          class="max-w-[280px] max-h-[300px] rounded-lg"
+                          @error="handleMediaError($event, 'video')"
+                      />
+                      <div v-else class="w-[200px] h-[150px] bg-muted rounded-lg flex items-center justify-center">
+                        <span class="text-muted-foreground text-sm">[Video]</span>
+                      </div>
+                    </div>
+                    <!-- Audio message -->
+                    <div v-else-if="message.message_type === 'audio' && message.media_url" class="mb-2">
+                      <div v-if="isMediaLoading(message)" class="w-[200px] h-[40px] bg-muted rounded-lg animate-pulse"></div>
+                      <audio
+                          v-else-if="getMediaBlobUrl(message)"
+                          :src="getMediaBlobUrl(message)"
+                          controls
+                          class="max-w-[280px]"
+                          @error="handleMediaError($event, 'audio')"
+                      />
+                      <div v-else class="text-muted-foreground text-sm">[Audio]</div>
+                    </div>
+                    <!-- Document message -->
+                    <div v-else-if="message.message_type === 'document' && message.media_url" class="mb-2">
+                      <a
+                          v-if="getMediaBlobUrl(message)"
+                          :href="getMediaBlobUrl(message)"
+                          :download="message.media_filename || 'document'"
+                          class="flex items-center gap-2 px-3 py-2 bg-background/50 rounded-lg hover:bg-background/80 transition-colors"
+                      >
+                        <FileText class="h-5 w-5 text-muted-foreground" />
+                        <span class="text-sm truncate max-w-[200px]">
+                      {{ message.media_filename || 'Document' }}
+                    </span>
+                      </a>
+                      <div v-else-if="isMediaLoading(message)" class="flex items-center gap-2 px-3 py-2 bg-background/50 rounded-lg">
+                        <FileText class="h-5 w-5 text-muted-foreground" />
+                        <span class="text-sm text-muted-foreground">Loading...</span>
+                      </div>
+                      <div v-else class="flex items-center gap-2 px-3 py-2 bg-background/50 rounded-lg">
+                        <FileText class="h-5 w-5 text-muted-foreground" />
+                        <span class="text-sm text-muted-foreground">[Document]</span>
+                      </div>
+                    </div>
+                    <!-- Location message -->
+                    <div v-else-if="message.message_type === 'location' && getLocationData(message)" class="mb-2">
+                      <a
+                          :href="getGoogleMapsUrl(getLocationData(message)!)"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="flex items-center gap-3 px-3 py-3 bg-background/50 rounded-lg hover:bg-background/80 transition-colors"
+                      >
+                        <div class="h-10 w-10 rounded-full bg-red-900/30 light:bg-red-100 flex items-center justify-center shrink-0">
+                          <MapPin class="h-5 w-5 text-red-500" />
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <p v-if="getLocationData(message)?.name" class="text-sm font-medium truncate">
+                            {{ getLocationData(message)?.name }}
+                          </p>
+                          <p v-else class="text-sm font-medium">Location</p>
+                          <p v-if="getLocationData(message)?.address" class="text-xs text-muted-foreground truncate">
+                            {{ getLocationData(message)?.address }}
+                          </p>
+                          <p class="text-xs text-muted-foreground">
+                            {{ getLocationData(message)?.latitude.toFixed(6) }}, {{ getLocationData(message)?.longitude.toFixed(6) }}
+                          </p>
+                        </div>
+                        <ExternalLink class="h-4 w-4 text-muted-foreground shrink-0" />
+                      </a>
+                    </div>
+                    <!-- Contacts message -->
+                    <div v-else-if="message.message_type === 'contacts' && getContactsData(message).length > 0" class="mb-2 space-y-2">
+                      <div
+                          v-for="(contact, idx) in getContactsData(message)"
+                          :key="idx"
+                          class="flex items-center gap-3 px-3 py-2 bg-background/50 rounded-lg"
+                      >
+                        <div class="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <User class="h-5 w-5 text-primary" />
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <p class="text-sm font-medium truncate">{{ contact.name }}</p>
+                          <div v-if="contact.phones?.length" class="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Phone class="h-3 w-3" />
+                            <span class="truncate">{{ contact.phones.join(', ') }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <!-- Unsupported message -->
+                    <div v-else-if="message.message_type === 'unsupported'" class="mb-2">
+                      <div class="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-lg text-muted-foreground">
+                        <AlertCircle class="h-4 w-4 shrink-0" />
+                        <span class="text-sm italic">This message type is not supported</span>
+                      </div>
+                    </div>
+                    <!-- Button reply - WhatsApp style -->
+                    <div v-if="message.message_type === 'button_reply'" class="button-reply-bubble">
+                      <span class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}</span>
+                      <span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span></span>
+                    </div>
+                    <!-- Text content (for text messages or captions) -->
+                    <span v-else-if="getMessageContent(message)" class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                    <!-- Fallback for media without URL -->
+                    <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                    <!-- Interactive buttons - WhatsApp style -->
+                    <div
+                        v-if="getInteractiveButtons(message).length > 0"
+                        class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t"
+                    >
+                      <div
+                          v-for="(btn, index) in getInteractiveButtons(message)"
+                          :key="btn.id"
+                          :class="[
                       'py-2 text-sm text-center font-medium cursor-pointer',
                       index > 0 && 'border-t'
                     ]"
-                  >
-                    {{ btn.title }}
-                  </div>
-                </div>
-                <!-- CTA URL button - WhatsApp style -->
-                <a
-                  v-if="getCTAUrlData(message)"
-                  :href="getCTAUrlData(message)?.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t block"
-                >
-                  <div class="py-2 text-sm text-center font-medium cursor-pointer flex items-center justify-center gap-1.5">
-                    <ExternalLink class="h-3.5 w-3.5" />
-                    {{ getCTAUrlData(message)?.button_text }}
-                  </div>
-                </a>
-                <!-- Time for messages without text content -->
-                <span v-if="!getMessageContent(message) && !(isMediaMessage(message) && !message.media_url)" class="chat-bubble-time block clear-both">
+                      >
+                        {{ btn.title }}
+                      </div>
+                    </div>
+                    <!-- CTA URL button - WhatsApp style -->
+                    <a
+                        v-if="getCTAUrlData(message)"
+                        :href="getCTAUrlData(message)?.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t block"
+                    >
+                      <div class="py-2 text-sm text-center font-medium cursor-pointer flex items-center justify-center gap-1.5">
+                        <ExternalLink class="h-3.5 w-3.5" />
+                        {{ getCTAUrlData(message)?.button_text }}
+                      </div>
+                    </a>
+                    <!-- Time for messages without text content -->
+                    <span v-if="!getMessageContent(message) && !(isMediaMessage(message) && !message.media_url)" class="chat-bubble-time block clear-both">
                   <span>{{ formatMessageTime(message.created_at) }}</span>
                   <component
-                    v-if="message.direction === 'outgoing'"
-                    :is="getMessageStatusIcon(message.status)"
-                    :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]"
+                      v-if="message.direction === 'outgoing'"
+                      :is="getMessageStatusIcon(message.status)"
+                      :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]"
                   />
                 </span>
-                <!-- Reactions display -->
-                <div
-                  v-if="message.reactions && message.reactions.length > 0"
-                  class="reactions-display flex flex-wrap gap-1 mt-1"
-                >
+                    <!-- Reactions display -->
+                    <div
+                        v-if="message.reactions && message.reactions.length > 0"
+                        class="reactions-display flex flex-wrap gap-1 mt-1"
+                    >
                   <span
-                    v-for="(reaction, idx) in message.reactions"
-                    :key="idx"
-                    class="reaction-badge"
-                    :title="reaction.from_phone || reaction.from_user || ''"
+                      v-for="(reaction, idx) in message.reactions"
+                      :key="idx"
+                      class="reaction-badge"
+                      :title="reaction.from_phone || reaction.from_user || ''"
                   >
                     {{ reaction.emoji }}
                   </span>
-                </div>
-                <!-- Failed message retry indicator (not for template messages) -->
-                <button
-                  v-if="message.status === 'failed' && message.direction === 'outgoing' && message.message_type !== 'template'"
-                  class="flex items-center gap-1 mt-1 text-xs text-destructive hover:underline cursor-pointer"
-                  :disabled="retryingMessageId === message.id"
-                  @click="retryMessage(message)"
-                >
-                  <Loader2 v-if="retryingMessageId === message.id" class="h-3 w-3 animate-spin" />
-                  <RotateCw v-else class="h-3 w-3" />
-                  <span>{{ retryingMessageId === message.id ? 'Retrying...' : 'Failed - Tap to retry' }}</span>
-                </button>
-                <!-- Failed template message indicator (no retry) -->
-                <span
-                  v-if="message.status === 'failed' && message.direction === 'outgoing' && message.message_type === 'template'"
-                  class="flex items-center gap-1 mt-1 text-xs text-destructive"
-                >
+                    </div>
+                    <!-- Failed message retry indicator (not for template messages) -->
+                    <button
+                        v-if="message.status === 'failed' && message.direction === 'outgoing' && message.message_type !== 'template'"
+                        class="flex items-center gap-1 mt-1 text-xs text-destructive hover:underline cursor-pointer"
+                        :disabled="retryingMessageId === message.id"
+                        @click="retryMessage(message)"
+                    >
+                      <Loader2 v-if="retryingMessageId === message.id" class="h-3 w-3 animate-spin" />
+                      <RotateCw v-else class="h-3 w-3" />
+                      <span>{{ retryingMessageId === message.id ? 'Retrying...' : 'Failed - Tap to retry' }}</span>
+                    </button>
+                    <!-- Failed template message indicator (no retry) -->
+                    <span
+                        v-if="message.status === 'failed' && message.direction === 'outgoing' && message.message_type === 'template'"
+                        class="flex items-center gap-1 mt-1 text-xs text-destructive"
+                    >
                   <AlertCircle class="h-3 w-3" />
                   <span>Failed to send</span>
                 </span>
-              </div>
-              <!-- Action buttons for incoming messages -->
-              <div v-if="message.direction === 'incoming'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
-                <Popover :open="reactionPickerMessageId === message.id" @update:open="(open: boolean) => reactionPickerMessageId = open ? message.id : null">
-                  <PopoverTrigger as-child>
-                    <Button variant="ghost" size="icon" class="h-6 w-6">
-                      <SmilePlus class="h-3 w-3" />
+                  </div>
+                  <!-- Action buttons for incoming messages -->
+                  <div v-if="message.direction === 'incoming'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
+                    <Popover :open="reactionPickerMessageId === message.id" @update:open="(open: boolean) => reactionPickerMessageId = open ? message.id : null">
+                      <PopoverTrigger as-child>
+                        <Button variant="ghost" size="icon" class="h-6 w-6">
+                          <SmilePlus class="h-3 w-3" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent side="top" class="w-auto p-2">
+                        <div class="flex gap-1">
+                          <button
+                              v-for="emoji in quickReactionEmojis"
+                              :key="emoji"
+                              class="text-lg hover:bg-muted p-1 rounded cursor-pointer"
+                              @click="sendReaction(message.id, emoji)"
+                          >
+                            {{ emoji }}
+                          </button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-6 w-6"
+                        @click="replyToMessage(message)"
+                    >
+                      <Reply class="h-3 w-3" />
                     </Button>
-                  </PopoverTrigger>
-                  <PopoverContent side="top" class="w-auto p-2">
-                    <div class="flex gap-1">
-                      <button
-                        v-for="emoji in quickReactionEmojis"
-                        :key="emoji"
-                        class="text-lg hover:bg-muted p-1 rounded cursor-pointer"
-                        @click="sendReaction(message.id, emoji)"
-                      >
-                        {{ emoji }}
-                      </button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6"
-                  @click="replyToMessage(message)"
-                >
-                  <Reply class="h-3 w-3" />
-                </Button>
-              </div>
-              <!-- Reply button for outgoing messages (shown on hover) -->
-              <div v-if="message.direction === 'outgoing'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
-                <Popover :open="reactionPickerMessageId === message.id" @update:open="(open: boolean) => reactionPickerMessageId = open ? message.id : null">
-                  <PopoverTrigger as-child>
-                    <Button variant="ghost" size="icon" class="h-6 w-6">
-                      <SmilePlus class="h-3 w-3" />
+                  </div>
+                  <!-- Reply button for outgoing messages (shown on hover) -->
+                  <div v-if="message.direction === 'outgoing'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
+                    <Popover :open="reactionPickerMessageId === message.id" @update:open="(open: boolean) => reactionPickerMessageId = open ? message.id : null">
+                      <PopoverTrigger as-child>
+                        <Button variant="ghost" size="icon" class="h-6 w-6">
+                          <SmilePlus class="h-3 w-3" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent side="top" class="w-auto p-2">
+                        <div class="flex gap-1">
+                          <button
+                              v-for="emoji in quickReactionEmojis"
+                              :key="emoji"
+                              class="text-lg hover:bg-muted p-1 rounded cursor-pointer"
+                              @click="sendReaction(message.id, emoji)"
+                          >
+                            {{ emoji }}
+                          </button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-6 w-6"
+                        @click="replyToMessage(message)"
+                    >
+                      <Reply class="h-3 w-3" />
                     </Button>
-                  </PopoverTrigger>
-                  <PopoverContent side="top" class="w-auto p-2">
-                    <div class="flex gap-1">
-                      <button
-                        v-for="emoji in quickReactionEmojis"
-                        :key="emoji"
-                        class="text-lg hover:bg-muted p-1 rounded cursor-pointer"
-                        @click="sendReaction(message.id, emoji)"
-                      >
-                        {{ emoji }}
-                      </button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6"
-                  @click="replyToMessage(message)"
-                >
-                  <Reply class="h-3 w-3" />
-                </Button>
-                <Button
-                  v-if="message.status === 'failed' && message.message_type !== 'template'"
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6 text-destructive hover:text-destructive"
-                  :disabled="retryingMessageId === message.id"
-                  @click="retryMessage(message)"
-                  title="Retry sending"
-                >
-                  <Loader2 v-if="retryingMessageId === message.id" class="h-3 w-3 animate-spin" />
-                  <RotateCw v-else class="h-3 w-3" />
-                </Button>
-              </div>
+                    <Button
+                        v-if="message.status === 'failed' && message.message_type !== 'template'"
+                        variant="ghost"
+                        size="icon"
+                        class="h-6 w-6 text-destructive hover:text-destructive"
+                        :disabled="retryingMessageId === message.id"
+                        @click="retryMessage(message)"
+                        title="Retry sending"
+                    >
+                      <Loader2 v-if="retryingMessageId === message.id" class="h-3 w-3 animate-spin" />
+                      <RotateCw v-else class="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              </template>
+              <div ref="messagesEndRef" />
             </div>
-            </template>
-            <div ref="messagesEndRef" />
-          </div>
-        </ScrollArea>
+          </ScrollArea>
         </div>
 
         <!-- Reply indicator -->
         <div
-          v-if="contactsStore.replyingTo"
-          class="px-4 py-2 border-t border-white/[0.08] light:border-gray-200 bg-white/[0.04] light:bg-gray-50 flex items-center justify-between"
+            v-if="contactsStore.replyingTo"
+            class="px-4 py-2 border-t border-white/[0.08] light:border-gray-200 bg-white/[0.04] light:bg-gray-50 flex items-center justify-between"
         >
           <div class="flex-1 min-w-0">
             <p class="text-xs font-medium text-white/50 light:text-gray-500">
@@ -1743,7 +1781,51 @@ async function sendMediaMessage() {
 
         <!-- Message Input -->
         <div class="p-4 border-t border-white/[0.08] light:border-gray-200 bg-[#0f0f10] light:bg-white">
-          <form @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
+          <!-- No Messages Warning (Force Template) -->
+          <div
+              v-if="contactsStore.messages.length === 0"
+              class="mb-3 px-4 py-3 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-start gap-3"
+          >
+            <Info class="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-blue-400 light:text-blue-600">Start a new conversation</p>
+              <p class="text-xs text-blue-400/70 light:text-blue-600/70 mt-0.5">
+                You must send a template message to initiate the conversation.
+              </p>
+            </div>
+            <Button
+                size="sm"
+                class="bg-blue-500 hover:bg-blue-600 text-white font-medium shrink-0"
+                @click="isTemplateDialogOpen = true"
+            >
+              <Send class="h-3.5 w-3.5 mr-1.5" />
+              Send Template
+            </Button>
+          </div>
+
+          <!-- 24h Window Closed Warning -->
+          <div
+              v-else-if="!isWithin24Hours"
+              class="mb-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-3"
+          >
+            <AlertTriangle class="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-amber-400 light:text-amber-600">24-hour messaging window closed</p>
+              <p class="text-xs text-amber-400/70 light:text-amber-600/70 mt-0.5">
+                You can only send template messages outside the 24-hour window.
+              </p>
+            </div>
+            <Button
+                size="sm"
+                class="bg-amber-500 hover:bg-amber-600 text-white font-medium shrink-0"
+                @click="isTemplateDialogOpen = true"
+            >
+              <Send class="h-3.5 w-3.5 mr-1.5" />
+              Send Template
+            </Button>
+          </div>
+
+          <form v-else @submit.prevent="sendMessage" class="flex items-center gap-2 p-2 rounded-xl bg-white/[0.06] light:bg-gray-100 border border-white/[0.08] light:border-gray-200">
             <Tooltip>
               <TooltipTrigger as-child>
                 <span>
@@ -1755,10 +1837,10 @@ async function sendMediaMessage() {
                     </PopoverTrigger>
                     <PopoverContent side="top" align="start" class="w-auto p-0">
                       <EmojiPicker
-                        :native="true"
-                        :disable-skin-tones="true"
-                        :theme="isDark ? 'dark' : 'light'"
-                        @select="insertEmoji($event.i)"
+                          :native="true"
+                          :disable-skin-tones="true"
+                          :theme="isDark ? 'dark' : 'light'"
+                          @select="insertEmoji($event.i)"
                       />
                     </PopoverContent>
                   </Popover>
@@ -1770,11 +1852,11 @@ async function sendMediaMessage() {
               <TooltipTrigger as-child>
                 <span>
                   <CannedResponsePicker
-                    :contact="contactsStore.currentContact"
-                    :external-open="cannedPickerOpen"
-                    :external-search="cannedSearchQuery"
-                    @select="insertCannedResponse"
-                    @close="closeCannedPicker"
+                      :contact="contactsStore.currentContact"
+                      :external-open="cannedPickerOpen"
+                      :external-search="cannedSearchQuery"
+                      @select="insertCannedResponse"
+                      @close="closeCannedPicker"
                   />
                 </span>
               </TooltipTrigger>
@@ -1789,20 +1871,20 @@ async function sendMediaMessage() {
               <TooltipContent>Attach file</TooltipContent>
             </Tooltip>
             <input
-              ref="fileInputRef"
-              type="file"
-              accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
-              class="hidden"
-              @change="handleFileSelect"
+                ref="fileInputRef"
+                type="file"
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+                class="hidden"
+                @change="handleFileSelect"
             />
             <textarea
-              ref="messageInputRef"
-              v-model="messageInput"
-              placeholder="Type a message..."
-              rows="1"
-              class="flex-1 bg-transparent text-[14px] text-white light:text-gray-900 placeholder:text-white/30 light:placeholder:text-gray-400 focus:outline-none resize-none min-h-[36px] max-h-[120px] py-2 overflow-y-auto"
-              @keydown.enter.exact.prevent="sendMessage"
-              @input="autoResizeTextarea"
+                ref="messageInputRef"
+                v-model="messageInput"
+                placeholder="Type a message..."
+                rows="1"
+                class="flex-1 bg-transparent text-[14px] text-white light:text-gray-900 placeholder:text-white/30 light:placeholder:text-gray-400 focus:outline-none resize-none min-h-[36px] max-h-[120px] py-2 overflow-y-auto"
+                @keydown.enter.exact.prevent="sendMessage"
+                @input="autoResizeTextarea"
             />
             <button type="submit" class="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600 flex items-center justify-center transition-colors disabled:opacity-50" :disabled="!messageInput.trim() || isSending">
               <Send class="w-4 h-4 text-white" />
@@ -1814,10 +1896,10 @@ async function sendMediaMessage() {
 
     <!-- Contact Info Panel -->
     <ContactInfoPanel
-      v-if="contactsStore.currentContact && isInfoPanelOpen"
-      :contact="contactsStore.currentContact"
-      :session-data="contactSessionData"
-      @close="isInfoPanelOpen = false"
+        v-if="contactsStore.currentContact && isInfoPanelOpen"
+        :contact="contactsStore.currentContact"
+        :session-data="contactSessionData"
+        @close="isInfoPanelOpen = false"
     />
 
     <!-- Assign Contact Dialog -->
@@ -1834,16 +1916,16 @@ async function sendMediaMessage() {
           <div class="relative">
             <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
-              v-model="assignSearchQuery"
-              placeholder="Search users..."
-              class="pl-9 h-9"
+                v-model="assignSearchQuery"
+                placeholder="Search users..."
+                class="pl-9 h-9"
             />
           </div>
           <Button
-            v-if="contactsStore.currentContact?.assigned_user_id"
-            variant="outline"
-            class="w-full justify-start"
-            @click="assignContactToUser(null); isAssignDialogOpen = false"
+              v-if="contactsStore.currentContact?.assigned_user_id"
+              variant="outline"
+              class="w-full justify-start"
+              @click="assignContactToUser(null); isAssignDialogOpen = false"
           >
             <UserMinus class="mr-2 h-4 w-4" />
             Unassign
@@ -1852,17 +1934,17 @@ async function sendMediaMessage() {
           <ScrollArea class="max-h-[280px]">
             <div class="space-y-1">
               <Button
-                v-for="user in filteredAssignableUsers"
-                :key="user.id"
-                :variant="contactsStore.currentContact?.assigned_user_id === user.id ? 'secondary' : 'ghost'"
-                class="w-full justify-start"
-                @click="assignContactToUser(user.id); isAssignDialogOpen = false"
+                  v-for="user in filteredAssignableUsers"
+                  :key="user.id"
+                  :variant="contactsStore.currentContact?.assigned_user_id === user.id ? 'secondary' : 'ghost'"
+                  class="w-full justify-start"
+                  @click="assignContactToUser(user.id); isAssignDialogOpen = false"
               >
                 <User class="mr-2 h-4 w-4" />
                 <span>{{ user.full_name }}</span>
                 <Check
-                  v-if="contactsStore.currentContact?.assigned_user_id === user.id"
-                  class="ml-auto h-4 w-4 text-primary"
+                    v-if="contactsStore.currentContact?.assigned_user_id === user.id"
+                    class="ml-auto h-4 w-4 text-primary"
                 />
                 <Badge v-else variant="outline" class="ml-auto text-xs">
                   {{ user.role?.name }}
@@ -1890,17 +1972,17 @@ async function sendMediaMessage() {
           <!-- Image preview -->
           <div v-if="selectedFile?.type.startsWith('image/') && filePreviewUrl" class="flex justify-center">
             <img
-              :src="filePreviewUrl"
-              :alt="selectedFile.name"
-              class="max-w-full max-h-[300px] rounded-lg object-contain"
+                :src="filePreviewUrl"
+                :alt="selectedFile.name"
+                class="max-w-full max-h-[300px] rounded-lg object-contain"
             />
           </div>
           <!-- Video preview -->
           <div v-else-if="selectedFile?.type.startsWith('video/') && filePreviewUrl" class="flex justify-center">
             <video
-              :src="filePreviewUrl"
-              controls
-              class="max-w-full max-h-[300px] rounded-lg"
+                :src="filePreviewUrl"
+                controls
+                class="max-w-full max-h-[300px] rounded-lg"
             />
           </div>
           <!-- Audio preview -->
@@ -1933,10 +2015,10 @@ async function sendMediaMessage() {
           <!-- Caption input (not for audio) -->
           <div v-if="selectedFile && !selectedFile.type.startsWith('audio/')">
             <Textarea
-              v-model="mediaCaption"
-              placeholder="Add a caption..."
-              class="min-h-[60px] max-h-[100px] resize-none"
-              :rows="2"
+                v-model="mediaCaption"
+                placeholder="Add a caption..."
+                class="min-h-[60px] max-h-[100px] resize-none"
+                :rows="2"
             />
           </div>
 
@@ -1954,6 +2036,19 @@ async function sendMediaMessage() {
         </div>
       </DialogContent>
     </Dialog>
+
+    <!-- Template Message Dialog -->
+    <TemplateMessageDialog
+        v-model:open="isTemplateDialogOpen"
+        :contact-id="contactsStore.currentContact?.id ?? ''"
+        :whatsapp-account="(contactsStore.currentContact as any)?.whatsapp_account"
+    />
+    <NewChatDialog
+        :open="isNewChatDialogOpen"
+        @update:open="isNewChatDialogOpen = $event"
+        @chat-created="(id) => selectContact(id)"
+    />
+
   </div>
 </template>
 
