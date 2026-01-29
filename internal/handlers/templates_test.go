@@ -664,7 +664,7 @@ func TestApp_UpdateTemplate_Success(t *testing.T) {
 	assert.Equal(t, "es", resp.Data.Language)
 }
 
-func TestApp_UpdateTemplate_CannotEditApproved(t *testing.T) {
+func TestApp_UpdateTemplate_ApprovedToDraft(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
@@ -672,10 +672,11 @@ func TestApp_UpdateTemplate_CannotEditApproved(t *testing.T) {
 	user := testutil.CreateTestUser(t, app.DB, org.ID)
 	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
 
+	// Create an approved template
 	tmpl := createTestTemplateInDB(t, app, org.ID, account.Name, "approved_tmpl", "APPROVED")
 
 	body := map[string]interface{}{
-		"body_content": "Trying to update approved",
+		"body_content": "Updated body content",
 	}
 
 	req := testutil.NewJSONRequest(t, body)
@@ -684,7 +685,45 @@ func TestApp_UpdateTemplate_CannotEditApproved(t *testing.T) {
 
 	err := app.UpdateTemplate(req)
 	require.NoError(t, err)
-	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadRequest, "Cannot edit approved templates")
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data handlers.TemplateResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	assert.Equal(t, "Updated body content", resp.Data.BodyContent)
+	assert.Equal(t, "DRAFT", resp.Data.Status, "Status should change to DRAFT after editing approved template")
+}
+
+func TestApp_UpdateTemplate_RejectedToDraft(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	// Create a rejected template
+	tmpl := createTestTemplateInDB(t, app, org.ID, account.Name, "rejected_tmpl", "REJECTED")
+
+	body := map[string]interface{}{
+		"body_content": "Fixed body content",
+	}
+
+	req := testutil.NewJSONRequest(t, body)
+	testutil.SetAuthContext(req, org.ID, user.ID)
+	testutil.SetPathParam(req, "id", tmpl.ID.String())
+
+	err := app.UpdateTemplate(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data handlers.TemplateResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	assert.Equal(t, "Fixed body content", resp.Data.BodyContent)
+	assert.Equal(t, "DRAFT", resp.Data.Status, "Status should change to DRAFT after editing rejected template")
 }
 
 func TestApp_UpdateTemplate_NotFound(t *testing.T) {
@@ -944,7 +983,7 @@ func TestApp_SubmitTemplate_AlreadySubmitted(t *testing.T) {
 
 	err := app.SubmitTemplate(req)
 	require.NoError(t, err)
-	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadRequest, "already submitted")
+	testutil.AssertErrorResponse(t, req, fasthttp.StatusBadRequest, "pending approval")
 }
 
 func TestApp_SubmitTemplate_NotFound(t *testing.T) {
