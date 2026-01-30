@@ -10,24 +10,6 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -35,7 +17,7 @@ import {
 import { api } from '@/services/api'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { toast } from 'vue-sonner'
-import { PageHeader } from '@/components/shared'
+import { PageHeader, CrudFormDialog, DeleteConfirmDialog } from '@/components/shared'
 import { getErrorMessage } from '@/lib/api-utils'
 import {
   Plus,
@@ -552,180 +534,164 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
     </ScrollArea>
 
     <!-- Add/Edit Dialog -->
-    <Dialog v-model:open="isDialogOpen">
-      <DialogContent class="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{{ editingAccount ? 'Edit' : 'Add' }} WhatsApp Account</DialogTitle>
-          <DialogDescription>
-            Connect your WhatsApp Business account using the Meta Cloud API.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div class="space-y-4 py-4">
-          <div class="space-y-2">
-            <Label for="name">Account Name <span class="text-destructive">*</span></Label>
-            <Input
-                id="name"
-                v-model="formData.name"
-                placeholder="e.g., Main Business Line"
-            />
-          </div>
-
-          <Separator />
-
-          <div class="space-y-2">
-            <Label for="app_id">Meta App ID</Label>
-            <Input
-                id="app_id"
-                v-model="formData.app_id"
-                placeholder="e.g., 123456789012345"
-            />
-            <p class="text-xs text-muted-foreground">
-              Found in Meta Developer Console &gt; App Dashboard
-            </p>
-          </div>
-
-          <div class="space-y-2">
-            <Label for="phone_id">Phone Number ID <span class="text-destructive">*</span></Label>
-            <Input
-                id="phone_id"
-                v-model="formData.phone_id"
-                placeholder="e.g., 123456789012345"
-            />
-            <p class="text-xs text-muted-foreground">
-              Found in Meta Developer Console &gt; WhatsApp &gt; API Setup
-            </p>
-          </div>
-
-          <div class="space-y-2">
-            <Label for="business_id">WhatsApp Business Account ID <span class="text-destructive">*</span></Label>
-            <Input
-                id="business_id"
-                v-model="formData.business_id"
-                placeholder="e.g., 987654321098765"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <Label for="access_token">
-              Access Token
-              <span v-if="!editingAccount" class="text-destructive">*</span>
-              <span v-else class="text-muted-foreground">(leave blank to keep existing)</span>
-            </Label>
-            <Input
-                id="access_token"
-                v-model="formData.access_token"
-                type="password"
-                placeholder="Permanent access token from System User"
-            />
-            <p class="text-xs text-muted-foreground">
-              Generate in Business Settings &gt; System Users &gt; Generate Token
-            </p>
-          </div>
-
-          <div class="space-y-2">
-            <Label for="app_secret">
-              App Secret
-              <span v-if="editingAccount" class="text-muted-foreground">(leave blank to keep existing)</span>
-            </Label>
-            <Input
-                id="app_secret"
-                v-model="formData.app_secret"
-                type="password"
-                placeholder="Meta App Secret for webhook verification"
-            />
-            <p class="text-xs text-muted-foreground">
-              Found in Meta Developer Console &gt; App Settings &gt; Basic &gt; App Secret. Used to verify webhook signatures.
-            </p>
-          </div>
-
-          <Separator />
-
-          <div class="space-y-2">
-            <Label for="api_version">API Version</Label>
-            <Input
-                id="api_version"
-                v-model="formData.api_version"
-                placeholder="v21.0"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <Label for="webhook_verify_token">Webhook Verify Token</Label>
-            <Input
-                id="webhook_verify_token"
-                v-model="formData.webhook_verify_token"
-                placeholder="Auto-generated if empty"
-            />
-            <p class="text-xs text-muted-foreground">
-              Used to verify webhook requests from Meta
-            </p>
-          </div>
-
-          <Separator />
-
-          <div class="space-y-4">
-            <Label>Options</Label>
-            <div class="flex items-center justify-between">
-              <Label for="is_default_incoming" class="font-normal cursor-pointer">
-                Default for incoming messages
-              </Label>
-              <Switch
-                  id="is_default_incoming"
-                  :checked="formData.is_default_incoming"
-                  @update:checked="formData.is_default_incoming = $event"
-              />
-            </div>
-            <div class="flex items-center justify-between">
-              <Label for="is_default_outgoing" class="font-normal cursor-pointer">
-                Default for outgoing messages
-              </Label>
-              <Switch
-                  id="is_default_outgoing"
-                  :checked="formData.is_default_outgoing"
-                  @update:checked="formData.is_default_outgoing = $event"
-              />
-            </div>
-            <div class="flex items-center justify-between">
-              <Label for="auto_read_receipt" class="font-normal cursor-pointer">
-                Automatically send read receipts
-              </Label>
-              <Switch
-                  id="auto_read_receipt"
-                  :checked="formData.auto_read_receipt"
-                  @update:checked="formData.auto_read_receipt = $event"
-              />
-            </div>
-          </div>
+    <CrudFormDialog
+      v-model:open="isDialogOpen"
+      :is-editing="!!editingAccount"
+      :is-submitting="isSubmitting"
+      edit-title="Edit WhatsApp Account"
+      create-title="Add WhatsApp Account"
+      description="Connect your WhatsApp Business account using the Meta Cloud API."
+      edit-submit-label="Update Account"
+      create-submit-label="Create Account"
+      max-width="max-w-lg"
+      @submit="saveAccount"
+    >
+      <div class="space-y-4">
+        <div class="space-y-2">
+          <Label for="name">Account Name <span class="text-destructive">*</span></Label>
+          <Input
+              id="name"
+              v-model="formData.name"
+              placeholder="e.g., Main Business Line"
+          />
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" size="sm" @click="isDialogOpen = false">Cancel</Button>
-          <Button size="sm" @click="saveAccount" :disabled="isSubmitting">
-            <Loader2 v-if="isSubmitting" class="h-4 w-4 mr-2 animate-spin" />
-            {{ editingAccount ? 'Update' : 'Create' }} Account
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <Separator />
+
+        <div class="space-y-2">
+          <Label for="app_id">Meta App ID</Label>
+          <Input
+              id="app_id"
+              v-model="formData.app_id"
+              placeholder="e.g., 123456789012345"
+          />
+          <p class="text-xs text-muted-foreground">
+            Found in Meta Developer Console &gt; App Dashboard
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="phone_id">Phone Number ID <span class="text-destructive">*</span></Label>
+          <Input
+              id="phone_id"
+              v-model="formData.phone_id"
+              placeholder="e.g., 123456789012345"
+          />
+          <p class="text-xs text-muted-foreground">
+            Found in Meta Developer Console &gt; WhatsApp &gt; API Setup
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="business_id">WhatsApp Business Account ID <span class="text-destructive">*</span></Label>
+          <Input
+              id="business_id"
+              v-model="formData.business_id"
+              placeholder="e.g., 987654321098765"
+          />
+        </div>
+
+        <div class="space-y-2">
+          <Label for="access_token">
+            Access Token
+            <span v-if="!editingAccount" class="text-destructive">*</span>
+            <span v-else class="text-muted-foreground">(leave blank to keep existing)</span>
+          </Label>
+          <Input
+              id="access_token"
+              v-model="formData.access_token"
+              type="password"
+              placeholder="Permanent access token from System User"
+          />
+          <p class="text-xs text-muted-foreground">
+            Generate in Business Settings &gt; System Users &gt; Generate Token
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="app_secret">
+            App Secret
+            <span v-if="editingAccount" class="text-muted-foreground">(leave blank to keep existing)</span>
+          </Label>
+          <Input
+              id="app_secret"
+              v-model="formData.app_secret"
+              type="password"
+              placeholder="Meta App Secret for webhook verification"
+          />
+          <p class="text-xs text-muted-foreground">
+            Found in Meta Developer Console &gt; App Settings &gt; Basic &gt; App Secret. Used to verify webhook signatures.
+          </p>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-2">
+          <Label for="api_version">API Version</Label>
+          <Input
+              id="api_version"
+              v-model="formData.api_version"
+              placeholder="v21.0"
+          />
+        </div>
+
+        <div class="space-y-2">
+          <Label for="webhook_verify_token">Webhook Verify Token</Label>
+          <Input
+              id="webhook_verify_token"
+              v-model="formData.webhook_verify_token"
+              placeholder="Auto-generated if empty"
+          />
+          <p class="text-xs text-muted-foreground">
+            Used to verify webhook requests from Meta
+          </p>
+        </div>
+
+        <Separator />
+
+        <div class="space-y-4">
+          <Label>Options</Label>
+          <div class="flex items-center justify-between">
+            <Label for="is_default_incoming" class="font-normal cursor-pointer">
+              Default for incoming messages
+            </Label>
+            <Switch
+                id="is_default_incoming"
+                :checked="formData.is_default_incoming"
+                @update:checked="formData.is_default_incoming = $event"
+            />
+          </div>
+          <div class="flex items-center justify-between">
+            <Label for="is_default_outgoing" class="font-normal cursor-pointer">
+              Default for outgoing messages
+            </Label>
+            <Switch
+                id="is_default_outgoing"
+                :checked="formData.is_default_outgoing"
+                @update:checked="formData.is_default_outgoing = $event"
+            />
+          </div>
+          <div class="flex items-center justify-between">
+            <Label for="auto_read_receipt" class="font-normal cursor-pointer">
+              Automatically send read receipts
+            </Label>
+            <Switch
+                id="auto_read_receipt"
+                :checked="formData.auto_read_receipt"
+                @update:checked="formData.auto_read_receipt = $event"
+            />
+          </div>
+        </div>
+      </div>
+    </CrudFormDialog>
 
     <!-- Delete Confirmation Dialog -->
-    <AlertDialog v-model:open="deleteDialogOpen">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete Account</AlertDialogTitle>
-          <AlertDialogDescription>
-            Are you sure you want to delete "{{ accountToDelete?.name }}"? This action cannot be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction @click="confirmDelete" class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <DeleteConfirmDialog
+      v-model:open="deleteDialogOpen"
+      title="Delete Account"
+      :item-name="accountToDelete?.name"
+      @confirm="confirmDelete"
+    />
 
     <BusinessProfileDialog
         v-model:open="isProfileDialogOpen"
