@@ -296,7 +296,7 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("Authorization", "Bearer "+account.AccessToken)
 
-resp, err := a.HTTPClient.Do(req)
+	resp, err := a.HTTPClient.Do(req)
 	if err != nil {
 		return r.SendEnvelope(map[string]interface{}{
 			"success": false,
