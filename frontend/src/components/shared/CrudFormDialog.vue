@@ -78,7 +78,7 @@ import { computed } from 'vue'
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent :class="maxWidth">
+    <DialogContent :class="[maxWidth, 'max-h-[90vh] overflow-y-auto']">
       <DialogHeader>
         <DialogTitle>{{ computedTitle }}</DialogTitle>
         <DialogDescription>{{ computedDescription }}</DialogDescription>
