@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -373,146 +374,12 @@ func generateVerifyToken() string {
 }
 
 // validateAccountCredentials validates WhatsApp account credentials with Meta API
-// It checks both the phone number endpoint and business account endpoint
-// and verifies that the phone number actually belongs to the specified business account
 func (a *App) validateAccountCredentials(phoneID, businessID, accessToken, apiVersion string) error {
-	// Reuse the existing WhatsApp client's HTTP client (already configured with 30s timeout)
-	// This prevents socket exhaustion and ensures proper connection pooling
-	client := a.WhatsApp.HTTPClient
-
-	// 1. Validate PhoneID and get its WABA ID
-	phoneURL := fmt.Sprintf("%s/%s/%s?fields=display_phone_number,verified_name,code_verification_status,account_mode,name_status,quality_rating,messaging_limit_tier",
-		a.Config.WhatsApp.BaseURL, apiVersion, phoneID)
-
-	phoneReq, err := http.NewRequest("GET", phoneURL, nil)
+	ctx := context.Background()
+	_, err := a.WhatsApp.ValidateCredentials(ctx, phoneID, businessID, accessToken, apiVersion)
 	if err != nil {
-		return fmt.Errorf("failed to create phone validation request: %w", err)
+		return err
 	}
-	phoneReq.Header.Set("Authorization", "Bearer "+accessToken)
-
-	phoneResp, err := client.Do(phoneReq)
-	if err != nil {
-		return fmt.Errorf("failed to validate phone_id: %w", err)
-	}
-	defer func() { _ = phoneResp.Body.Close() }()
-
-	phoneBody, _ := io.ReadAll(phoneResp.Body)
-
-	if phoneResp.StatusCode != 200 {
-		var errorResp map[string]interface{}
-		_ = json.Unmarshal(phoneBody, &errorResp)
-		if errData, ok := errorResp["error"].(map[string]interface{}); ok {
-			if msg, ok := errData["message"].(string); ok {
-				return fmt.Errorf("invalid phone_id or access_token: %s", msg)
-			}
-		}
-		return fmt.Errorf("invalid phone_id or access_token (status %d)", phoneResp.StatusCode)
-	}
-
-	// Parse phone response to check verification status
-	var phoneResult map[string]interface{}
-	if err := json.Unmarshal(phoneBody, &phoneResult); err != nil {
-		return fmt.Errorf("failed to parse phone response: %w", err)
-	}
-
-	// Check if this is a test/sandbox number
-	accountMode, _ := phoneResult["account_mode"].(string)
-	isTestNumber := accountMode == "SANDBOX"
-
-	// Check if phone number is verified/registered (skip for test/sandbox numbers)
-	// Only fail if the status is explicitly NOT_VERIFIED or EXPIRED
-	if !isTestNumber {
-		if verificationStatus, ok := phoneResult["code_verification_status"].(string); ok {
-			if verificationStatus == "NOT_VERIFIED" || verificationStatus == "EXPIRED" {
-				return fmt.Errorf("phone number is not verified (status: %s). Please register it at: https://business.facebook.com/wa/manage/phone-numbers/", verificationStatus)
-			}
-		}
-	}
-
-	// 2. Validate BusinessID
-	businessURL := fmt.Sprintf("%s/%s/%s?fields=id,name",
-		a.Config.WhatsApp.BaseURL, apiVersion, businessID)
-
-	businessReq, err := http.NewRequest("GET", businessURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create business validation request: %w", err)
-	}
-	businessReq.Header.Set("Authorization", "Bearer "+accessToken)
-
-	businessResp, err := client.Do(businessReq)
-	if err != nil {
-		return fmt.Errorf("failed to validate business_id: %w", err)
-	}
-	defer func() { _ = businessResp.Body.Close() }()
-
-	businessBody, _ := io.ReadAll(businessResp.Body)
-
-	if businessResp.StatusCode != 200 {
-		var errorResp map[string]interface{}
-		_ = json.Unmarshal(businessBody, &errorResp)
-		if errData, ok := errorResp["error"].(map[string]interface{}); ok {
-			if msg, ok := errData["message"].(string); ok {
-				return fmt.Errorf("invalid business_id: %s", msg)
-			}
-		}
-		return fmt.Errorf("invalid business_id (status %d)", businessResp.StatusCode)
-	}
-
-	// 3. Verify that the phone number belongs to this business account
-	// Get the list of phone numbers for this business account
-	phonesURL := fmt.Sprintf("%s/%s/%s/phone_numbers",
-		a.Config.WhatsApp.BaseURL, apiVersion, businessID)
-
-	phonesReq, err := http.NewRequest("GET", phonesURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create phones list request: %w", err)
-	}
-	phonesReq.Header.Set("Authorization", "Bearer "+accessToken)
-
-	phonesResp, err := client.Do(phonesReq)
-	if err != nil {
-		return fmt.Errorf("failed to fetch business phone numbers: %w", err)
-	}
-	defer func() { _ = phonesResp.Body.Close() }()
-
-	phonesBody, _ := io.ReadAll(phonesResp.Body)
-
-	if phonesResp.StatusCode != 200 {
-		var errorResp map[string]interface{}
-		_ = json.Unmarshal(phonesBody, &errorResp)
-		if errData, ok := errorResp["error"].(map[string]interface{}); ok {
-			if msg, ok := errData["message"].(string); ok {
-				return fmt.Errorf("failed to verify phone-business relationship: %s", msg)
-			}
-		}
-		return fmt.Errorf("failed to verify phone-business relationship (status %d)", phonesResp.StatusCode)
-	}
-
-	// Parse the phone numbers list
-	var phonesResult struct {
-		Data []struct {
-			ID                 string `json:"id"`
-			DisplayPhoneNumber string `json:"display_phone_number"`
-			VerifiedName       string `json:"verified_name"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(phonesBody, &phonesResult); err != nil {
-		return fmt.Errorf("failed to parse phone numbers list: %w", err)
-	}
-
-	// Check if our phoneID is in the list
-	phoneFound := false
-	for _, phone := range phonesResult.Data {
-		if phone.ID == phoneID {
-			phoneFound = true
-			break
-		}
-	}
-
-	if !phoneFound {
-		return fmt.Errorf("phone_id '%s' does not belong to business_id '%s'. Please verify your configuration", phoneID, businessID)
-	}
-
 	a.Log.Info("Account credentials validated successfully", "phone_id", phoneID, "business_id", businessID)
 	return nil
 }
