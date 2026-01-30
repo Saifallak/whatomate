@@ -10,7 +10,7 @@ import (
 
 // GetBusinessProfile returns the business profile for a WhatsApp account
 func (a *App) GetBusinessProfile(r *fastglue.Request) error {
-	orgID, err := getOrganizationID(r)
+	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -47,7 +47,7 @@ func (a *App) GetBusinessProfile(r *fastglue.Request) error {
 
 // UpdateBusinessProfile updates the business profile for a WhatsApp account
 func (a *App) UpdateBusinessProfile(r *fastglue.Request) error {
-	orgID, err := getOrganizationID(r)
+	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -104,7 +104,7 @@ func (a *App) UpdateBusinessProfile(r *fastglue.Request) error {
 
 // UpdateProfilePicture handles the profile picture upload
 func (a *App) UpdateProfilePicture(r *fastglue.Request) error {
-	orgID, err := getOrganizationID(r)
+	orgID, err := a.getOrgID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
