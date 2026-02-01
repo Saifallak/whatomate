@@ -513,7 +513,6 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	}
 
 	// 4. Subscribe app to WABA webhooks using existing WhatsApp service
-	ctx := context.Background()
 	if err := a.WhatsApp.SubscribeApp(ctx, a.toWhatsAppAccount(&account)); err != nil {
 		a.Log.Error("Failed to subscribe app to WABA", "error", err)
 		// Don't fail the whole operation if subscription fails
