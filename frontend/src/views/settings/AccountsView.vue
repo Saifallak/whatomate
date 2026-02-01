@@ -653,12 +653,21 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
             <div class="h-16 w-16 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/20">
               <Phone class="h-8 w-8 text-white" />
             </div>
-            <p class="text-lg font-medium text-white light:text-gray-900">No WhatsApp accounts connected</p>
-            <p class="text-sm mb-4">Connect your WhatsApp Business account to start sending and receiving messages.</p>
-            <Button variant="outline" size="sm" @click="openCreateDialog">
-              <Plus class="h-4 w-4 mr-2" />
-              Add Account
-            </Button>
+            <p class="text-lg font-medium text-white light:text-gray-900 mb-2">No WhatsApp accounts connected</p>
+            <p class="text-sm text-muted-foreground max-w-md mx-auto mb-6">
+              Connect your WhatsApp Business account via Facebook for quick setup, or use manual entry if you have your credentials ready.
+            </p>
+            <div class="flex gap-3 justify-center">
+              <Button @click="launchWhatsAppSignup" size="lg" :disabled="isConnectingFB || !isFBSDKLoaded">
+                <Facebook v-if="!isConnectingFB" class="mr-2 h-5 w-5" />
+                <Loader2 v-else class="mr-2 h-5 w-5 animate-spin" />
+                Connect with Facebook
+              </Button>
+              <Button @click="isDialogOpen = true" size="lg" variant="outline">
+                <Plus class="mr-2 h-5 w-5" />
+                Manual Entry
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -667,7 +676,7 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
           <CardContent class="p-6">
             <h3 class="font-semibold flex items-center gap-2 mb-4">
               <Settings2 class="h-5 w-5" />
-              Setup Guide
+              Manual Entry Setup Guide
             </h3>
             <ol class="list-decimal list-inside space-y-3 text-sm text-muted-foreground">
               <li>
