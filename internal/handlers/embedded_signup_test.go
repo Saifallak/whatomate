@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -26,25 +27,27 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 
 	// Mock Meta API server
 	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
 		switch {
-		case r.URL.Path == "/v21.0/oauth/access_token" || r.URL.Path == "/oauth/access_token":
-			// Token exchange
+		case path == "/v21.0/oauth/access_token" || path == "/oauth/access_token" ||
+			strings.HasPrefix(path, "/v21.0/oauth/access_token") || strings.HasPrefix(path, "/oauth/access_token"):
+			// Token exchange (may have query parameters)
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "EAABwzLixnjYBO1234567890",
 			})
-		case r.URL.Path == "/v21.0/123456789" || r.URL.Path == "/123456789":
+		case path == "/v21.0/123456789" || path == "/123456789":
 			// Phone info
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"verified_name":        "Test Business",
 				"display_phone_number": "+1234567890",
 			})
-		case r.URL.Path == "/v21.0/123456789/register" || r.URL.Path == "/123456789/register":
+		case path == "/v21.0/123456789/register" || path == "/123456789/register":
 			// Registration
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
-		case r.URL.Path == "/v21.0/987654321/subscribed_apps" || r.URL.Path == "/987654321/subscribed_apps":
+		case path == "/v21.0/987654321/subscribed_apps" || path == "/987654321/subscribed_apps":
 			// Webhook subscription
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
