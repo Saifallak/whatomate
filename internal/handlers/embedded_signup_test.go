@@ -345,7 +345,7 @@ func TestApp_RegisterPhone_Success_GeneratedPIN(t *testing.T) {
 
 	account := &models.WhatsAppAccount{
 		OrganizationID: org.ID,
-		Name:           "Test Account",
+		Name:           "Test Account - GeneratedPIN",
 		PhoneID:        "123456789",
 		BusinessID:     "987654321",
 		AccessToken:    "test_token",
@@ -394,7 +394,7 @@ func TestApp_RegisterPhone_RegistrationFailed(t *testing.T) {
 
 	account := &models.WhatsAppAccount{
 		OrganizationID: org.ID,
-		Name:           "Test Account",
+		Name:           "Test Account - RegFailed",
 		PhoneID:        "123456789",
 		BusinessID:     "987654321",
 		AccessToken:    "test_token",
