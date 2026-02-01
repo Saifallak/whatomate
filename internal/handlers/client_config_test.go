@@ -1,17 +1,22 @@
-package handlers
+package handlers_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/shridarpatil/whatomate/internal/config"
+	"github.com/shridarpatil/whatomate/internal/handlers"
+	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
-	"github.com/zerodha/fastglue"
 )
 
 func TestGetClientConfig(t *testing.T) {
+	t.Parallel()
+
 	// Setup test app with mock config
-	app := &App{
+	app := &handlers.App{
 		Config: &config.Config{
 			WhatsApp: config.WhatsAppConfig{
 				AppID:      "test-app-id-123",
@@ -22,32 +27,33 @@ func TestGetClientConfig(t *testing.T) {
 	}
 
 	// Create test request
-	ctx := &fasthttp.RequestCtx{}
-	ctx.Request.SetRequestURI("/api/config")
-	ctx.Request.Header.SetMethod("GET")
-
-	req := fastglue.NewRequest(ctx)
+	req := testutil.NewGETRequest(t)
 
 	// Call handler
 	err := app.GetClientConfig(req)
-	assert.NoError(t, err)
-
-	// Verify response
-	assert.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 
 	// Parse response body
-	body := ctx.Response.Body()
-	assert.Contains(t, string(body), "test-app-id-123")
-	assert.Contains(t, string(body), "test-config-id-456")
-	assert.Contains(t, string(body), "v21.0")
-	assert.Contains(t, string(body), "whatsapp_app_id")
-	assert.Contains(t, string(body), "whatsapp_config_id")
-	assert.Contains(t, string(body), "whatsapp_api_version")
+	var resp struct {
+		Data struct {
+			WhatsAppAppID      string `json:"whatsapp_app_id"`
+			WhatsAppConfigID   string `json:"whatsapp_config_id"`
+			WhatsAppAPIVersion string `json:"whatsapp_api_version"`
+		} `json:"data"`
+	}
+	err = json.Unmarshal(testutil.GetResponseBody(req), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "test-app-id-123", resp.Data.WhatsAppAppID)
+	assert.Equal(t, "test-config-id-456", resp.Data.WhatsAppConfigID)
+	assert.Equal(t, "v21.0", resp.Data.WhatsAppAPIVersion)
 }
 
 func TestGetClientConfig_EmptyValues(t *testing.T) {
+	t.Parallel()
+
 	// Setup test app with empty config
-	app := &App{
+	app := &handlers.App{
 		Config: &config.Config{
 			WhatsApp: config.WhatsAppConfig{
 				AppID:    "",
@@ -57,22 +63,23 @@ func TestGetClientConfig_EmptyValues(t *testing.T) {
 	}
 
 	// Create test request
-	ctx := &fasthttp.RequestCtx{}
-	ctx.Request.SetRequestURI("/api/config")
-	ctx.Request.Header.SetMethod("GET")
-
-	req := fastglue.NewRequest(ctx)
+	req := testutil.NewGETRequest(t)
 
 	// Call handler
 	err := app.GetClientConfig(req)
-	assert.NoError(t, err)
-
-	// Verify response
-	assert.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode())
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 
 	// Parse response body - should still have structure
-	body := ctx.Response.Body()
-	assert.Contains(t, string(body), "whatsapp_app_id")
-	assert.Contains(t, string(body), "whatsapp_config_id")
-	assert.Contains(t, string(body), "whatsapp_api_version")
+	var resp struct {
+		Data struct {
+			WhatsAppAppID      string `json:"whatsapp_app_id"`
+			WhatsAppConfigID   string `json:"whatsapp_config_id"`
+			WhatsAppAPIVersion string `json:"whatsapp_api_version"`
+		} `json:"data"`
+	}
+	err = json.Unmarshal(testutil.GetResponseBody(req), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "", resp.Data.WhatsAppAppID)
+	assert.Equal(t, "", resp.Data.WhatsAppConfigID)
 }

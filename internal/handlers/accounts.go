@@ -647,7 +647,7 @@ func (a *App) performRegistration(phoneID, pin, accessToken, apiVersion string) 
 		if json.Unmarshal(body, &errResp) == nil {
 			if e, ok := errResp["error"].(map[string]interface{}); ok {
 				if msg, ok := e["message"].(string); ok {
-					return fmt.Errorf(msg)
+					return fmt.Errorf("%s", msg)
 				}
 			}
 		}
