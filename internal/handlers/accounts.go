@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -617,44 +616,6 @@ func (a *App) RegisterPhone(r *fastglue.Request) error {
 		"message": "Phone number registered successfully",
 		"pin":     pin,
 	})
-}
-
-// performRegistration performs the actual registration call
-func (a *App) performRegistration(phoneID, pin, accessToken, apiVersion string) error {
-	url := fmt.Sprintf("%s/%s/%s/register",
-		a.Config.WhatsApp.BaseURL, apiVersion, phoneID)
-
-	payload := map[string]string{
-		"messaging_product": "whatsapp",
-		"pin":               pin,
-	}
-	jsonPayload, _ := json.Marshal(payload)
-
-	httpReq, _ := http.NewRequest("POST", url, io.NopCloser(bytes.NewBuffer(jsonPayload)))
-	httpReq.Header.Set("Authorization", "Bearer "+accessToken)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.WhatsApp.HTTPClient.Do(httpReq)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		// Try to parse clean error message
-		var errResp map[string]interface{}
-		if json.Unmarshal(body, &errResp) == nil {
-			if e, ok := errResp["error"].(map[string]interface{}); ok {
-				if msg, ok := e["message"].(string); ok {
-					return fmt.Errorf("%s", msg)
-				}
-			}
-		}
-		return fmt.Errorf("registration API failed: %s", string(body))
-	}
-
-	return nil
 }
 
 func generateNumericPIN(length int) string {
