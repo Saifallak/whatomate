@@ -99,18 +99,20 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 
 	// Mock Meta API server - registration fails (PIN already exists)
 	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
 		switch {
-		case r.URL.Path == "/v21.0/oauth/access_token" || r.URL.Path == "/oauth/access_token":
+		case path == "/v21.0/oauth/access_token" || path == "/oauth/access_token" ||
+			strings.HasPrefix(path, "/v21.0/oauth/access_token") || strings.HasPrefix(path, "/oauth/access_token"):
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "test_token",
 			})
-		case r.URL.Path == "/v21.0/123456789" || r.URL.Path == "/123456789":
+		case path == "/v21.0/123456789" || path == "/123456789":
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"verified_name": "Test Business",
 			})
-		case r.URL.Path == "/v21.0/123456789/register" || r.URL.Path == "/123456789/register":
+		case path == "/v21.0/123456789/register" || path == "/123456789/register":
 			// Registration fails - PIN already exists
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(whatsapp.MetaAPIError{
@@ -129,7 +131,7 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 					Code:    33,
 				},
 			})
-		case r.URL.Path == "/v21.0/987654321/subscribed_apps" || r.URL.Path == "/987654321/subscribed_apps":
+		case path == "/v21.0/987654321/subscribed_apps" || path == "/987654321/subscribed_apps":
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		default:
