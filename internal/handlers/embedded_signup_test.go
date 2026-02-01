@@ -27,24 +27,24 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 	// Mock Meta API server
 	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v21.0/oauth/access_token":
+		case r.URL.Path == "/v21.0/oauth/access_token" || r.URL.Path == "/oauth/access_token":
 			// Token exchange
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "EAABwzLixnjYBO1234567890",
 			})
-		case r.URL.Path == "/v21.0/123456789":
+		case r.URL.Path == "/v21.0/123456789" || r.URL.Path == "/123456789":
 			// Phone info
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"verified_name":        "Test Business",
 				"display_phone_number": "+1234567890",
 			})
-		case r.URL.Path == "/v21.0/123456789/register":
+		case r.URL.Path == "/v21.0/123456789/register" || r.URL.Path == "/123456789/register":
 			// Registration
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
-		case r.URL.Path == "/v21.0/987654321/subscribed_apps":
+		case r.URL.Path == "/v21.0/987654321/subscribed_apps" || r.URL.Path == "/987654321/subscribed_apps":
 			// Webhook subscription
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -97,17 +97,17 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 	// Mock Meta API server - registration fails (PIN already exists)
 	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/v21.0/oauth/access_token":
+		case r.URL.Path == "/v21.0/oauth/access_token" || r.URL.Path == "/oauth/access_token":
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "test_token",
 			})
-		case r.URL.Path == "/v21.0/123456789":
+		case r.URL.Path == "/v21.0/123456789" || r.URL.Path == "/123456789":
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"verified_name": "Test Business",
 			})
-		case r.URL.Path == "/v21.0/123456789/register":
+		case r.URL.Path == "/v21.0/123456789/register" || r.URL.Path == "/123456789/register":
 			// Registration fails - PIN already exists
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(whatsapp.MetaAPIError{
@@ -126,9 +126,11 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 					Code:    33,
 				},
 			})
-		case r.URL.Path == "/v21.0/987654321/subscribed_apps":
+		case r.URL.Path == "/v21.0/987654321/subscribed_apps" || r.URL.Path == "/987654321/subscribed_apps":
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer metaServer.Close()
@@ -284,7 +286,7 @@ func TestApp_RegisterPhone_Success_WithPIN(t *testing.T) {
 	// Create account with pending_registration status
 	account := &models.WhatsAppAccount{
 		OrganizationID: org.ID,
-		Name:           "Test Account",
+		Name:           "Test Account - RegisterPhone WithPIN",
 		PhoneID:        "123456789",
 		BusinessID:     "987654321",
 		AccessToken:    "test_token",
@@ -495,7 +497,7 @@ func TestApp_RegisterPhone_CrossOrgIsolation(t *testing.T) {
 	// Create account in org1
 	account := &models.WhatsAppAccount{
 		OrganizationID: org1.ID,
-		Name:           "Test Account",
+		Name:           "Test Account - CrossOrg Isolation",
 		PhoneID:        "123456789",
 		BusinessID:     "987654321",
 		AccessToken:    "test_token",
