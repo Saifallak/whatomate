@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -419,4 +420,251 @@ func (a *App) SubscribeApp(r *fastglue.Request) error {
 		"success": true,
 		"message": "App subscribed to webhooks successfully. You should now receive incoming messages.",
 	})
+}
+
+// ExchangeToken exchanges the temporary code for a permanent access token and creates the account
+func (a *App) ExchangeToken(r *fastglue.Request) error {
+	orgID, err := a.getOrgID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	var req struct {
+		Code               string `json:"code" validate:"required"`
+		PhoneID            string `json:"phone_id" validate:"required"`
+		WABAID             string `json:"waba_id" validate:"required"`
+		Name               string `json:"name"`
+		WebhookVerifyToken string `json:"webhook_verify_token"`
+	}
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+
+	if req.Code == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Code is required", nil, "")
+	}
+
+	// 1. Exchange code for user access token using WhatsApp service
+	ctx := context.Background()
+	accessToken, err := a.WhatsApp.ExchangeCodeForToken(ctx, req.Code,
+		a.Config.WhatsApp.AppID, a.Config.WhatsApp.AppSecret, a.Config.WhatsApp.APIVersion)
+	if err != nil {
+		a.Log.Error("Failed to exchange token", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+	}
+
+	// 2. We can now create/update the account
+	var account models.WhatsAppAccount
+	var existingAccount bool
+	if err := a.DB.Where("phone_id = ? AND organization_id = ?", req.PhoneID, orgID).First(&account).Error; err == nil {
+		existingAccount = true
+	}
+
+	if req.Name == "" {
+		// Try to fetch name from Meta using WhatsApp service
+		phoneInfo, err := a.WhatsApp.GetPhoneNumberInfo(ctx, req.PhoneID, accessToken, a.Config.WhatsApp.APIVersion)
+		if err == nil && phoneInfo.VerifiedName != "" {
+			req.Name = fmt.Sprintf("%s %s", phoneInfo.VerifiedName, generateNumericPIN(4))
+		} else {
+			// Safe substring handling
+			suffix := req.PhoneID
+			if len(req.PhoneID) > 4 {
+				suffix = req.PhoneID[len(req.PhoneID)-4:]
+			}
+			req.Name = "WhatsApp Account " + suffix
+		}
+	}
+
+	// Generate verify token if needed
+	if req.WebhookVerifyToken == "" {
+		if existingAccount {
+			req.WebhookVerifyToken = account.WebhookVerifyToken
+		} else {
+			req.WebhookVerifyToken = generateVerifyToken()
+		}
+	}
+
+	account.OrganizationID = orgID
+	account.Name = req.Name
+	account.AppID = a.Config.WhatsApp.AppID
+	account.PhoneID = req.PhoneID
+	account.BusinessID = req.WABAID
+	account.AccessToken = accessToken
+	account.WebhookVerifyToken = req.WebhookVerifyToken
+	account.APIVersion = a.Config.WhatsApp.APIVersion
+	account.Status = "pending_registration"
+
+	if !existingAccount {
+		account.IsDefaultIncoming = false
+		account.IsDefaultOutgoing = false
+		account.AutoReadReceipt = false
+	}
+
+	// 3. Attempt Auto-Registration with random PIN using WhatsApp service
+	generatedPin := generateNumericPIN(6)
+	regErr := a.WhatsApp.RegisterPhoneNumber(ctx, account.PhoneID, generatedPin, accessToken, account.APIVersion)
+
+	if regErr == nil {
+		account.Status = "active"
+		account.Pin = generatedPin
+	} else {
+		a.Log.Warn("Auto-registration failed (likely existing PIN or permissions)", "error", regErr)
+		account.Status = "pending_registration"
+	}
+
+	// 4. Subscribe app to WABA webhooks using existing WhatsApp service
+	ctx := context.Background()
+	if err := a.WhatsApp.SubscribeApp(ctx, a.toWhatsAppAccount(&account)); err != nil {
+		a.Log.Error("Failed to subscribe app to WABA", "error", err)
+		// Don't fail the whole operation if subscription fails
+	}
+
+	if err := a.DB.Save(&account).Error; err != nil {
+		a.Log.Error("Failed to save account", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account", nil, "")
+	}
+
+	// Invalidate cache
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+
+	// Log success
+	a.Log.Info("Account created via embedded signup",
+		"account_id", account.ID,
+		"phone_id", account.PhoneID,
+		"status", account.Status,
+		"organization_id", orgID)
+
+	accResp := accountToResponse(account)
+
+	// Return PIN to user if auto-registration succeeded
+	// User needs this for Meta Business Manager
+	response := map[string]interface{}{
+		"id":                   accResp.ID,
+		"name":                 accResp.Name,
+		"app_id":               accResp.AppID,
+		"phone_id":             accResp.PhoneID,
+		"business_id":          accResp.BusinessID,
+		"webhook_verify_token": accResp.WebhookVerifyToken,
+		"api_version":          accResp.APIVersion,
+		"is_default_incoming":  accResp.IsDefaultIncoming,
+		"is_default_outgoing":  accResp.IsDefaultOutgoing,
+		"auto_read_receipt":    accResp.AutoReadReceipt,
+		"status":               accResp.Status,
+		"has_access_token":     accResp.HasAccessToken,
+		"has_app_secret":       accResp.HasAppSecret,
+		"created_at":           accResp.CreatedAt,
+		"updated_at":           accResp.UpdatedAt,
+	}
+
+	// Include PIN only if registration succeeded
+	if account.Status == "active" && account.Pin != "" {
+		response["pin"] = account.Pin
+	}
+
+	return r.SendEnvelope(response)
+}
+
+// RegisterPhone registers the phone number with Two-Step Verification
+func (a *App) RegisterPhone(r *fastglue.Request) error {
+	orgID, err := a.getOrgID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	id, err := parsePathUUID(r, "id", "account")
+	if err != nil {
+		return nil
+	}
+
+	var req struct {
+		Pin string `json:"pin"` // Optional custom PIN
+	}
+	_ = r.Decode(&req, "json")
+
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Account not found", nil, "")
+	}
+
+	// If PIN is not provided, generate a random one
+	pin := req.Pin
+	if pin == "" {
+		pin = generateNumericPIN(6)
+	}
+
+	// Call Meta Register endpoint using WhatsApp service
+	ctx := context.Background()
+	if err := a.WhatsApp.RegisterPhoneNumber(ctx, account.PhoneID, pin, account.AccessToken, account.APIVersion); err != nil {
+		a.Log.Error("Manual registration failed", "error", err)
+		return r.SendEnvelope(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// Success
+	account.Status = "active"
+	account.Pin = pin
+
+	if err := a.DB.Save(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account status", nil, "")
+	}
+
+	// Invalidate cache
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+
+	return r.SendEnvelope(map[string]interface{}{
+		"success": true,
+		"message": "Phone number registered successfully",
+		"pin":     pin,
+	})
+}
+
+// performRegistration performs the actual registration call
+func (a *App) performRegistration(phoneID, pin, accessToken, apiVersion string) error {
+	url := fmt.Sprintf("%s/%s/%s/register",
+		a.Config.WhatsApp.BaseURL, apiVersion, phoneID)
+
+	payload := map[string]string{
+		"messaging_product": "whatsapp",
+		"pin":               pin,
+	}
+	jsonPayload, _ := json.Marshal(payload)
+
+	httpReq, _ := http.NewRequest("POST", url, io.NopCloser(bytes.NewBuffer(jsonPayload)))
+	httpReq.Header.Set("Authorization", "Bearer "+accessToken)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.WhatsApp.HTTPClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		// Try to parse clean error message
+		var errResp map[string]interface{}
+		if json.Unmarshal(body, &errResp) == nil {
+			if e, ok := errResp["error"].(map[string]interface{}); ok {
+				if msg, ok := e["message"].(string); ok {
+					return fmt.Errorf(msg)
+				}
+			}
+		}
+		return fmt.Errorf("registration API failed: %s", string(body))
+	}
+
+	return nil
+}
+
+func generateNumericPIN(length int) string {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "123456" // Fallback
+	}
+	for i := range b {
+		b[i] = (b[i] % 10) + '0'
+	}
+	return string(b)
 }

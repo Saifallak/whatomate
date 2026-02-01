@@ -14,8 +14,9 @@ func TestGetClientConfig(t *testing.T) {
 	app := &App{
 		Config: &config.Config{
 			WhatsApp: config.WhatsAppConfig{
-				AppID:    "test-app-id-123",
-				ConfigID: "test-config-id-456",
+				AppID:      "test-app-id-123",
+				ConfigID:   "test-config-id-456",
+				APIVersion: "v21.0",
 			},
 		},
 	}
@@ -38,8 +39,10 @@ func TestGetClientConfig(t *testing.T) {
 	body := ctx.Response.Body()
 	assert.Contains(t, string(body), "test-app-id-123")
 	assert.Contains(t, string(body), "test-config-id-456")
+	assert.Contains(t, string(body), "v21.0")
 	assert.Contains(t, string(body), "whatsapp_app_id")
 	assert.Contains(t, string(body), "whatsapp_config_id")
+	assert.Contains(t, string(body), "whatsapp_api_version")
 }
 
 func TestGetClientConfig_EmptyValues(t *testing.T) {
@@ -71,4 +74,5 @@ func TestGetClientConfig_EmptyValues(t *testing.T) {
 	body := ctx.Response.Body()
 	assert.Contains(t, string(body), "whatsapp_app_id")
 	assert.Contains(t, string(body), "whatsapp_config_id")
+	assert.Contains(t, string(body), "whatsapp_api_version")
 }

@@ -651,3 +651,96 @@ func (c *Client) SubscribeApp(ctx context.Context, account *Account) error {
 	c.Log.Info("App subscribed to webhooks", "business_id", account.BusinessID)
 	return nil
 }
+
+// TokenExchangeResponse represents the response from OAuth token exchange
+type TokenExchangeResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+}
+
+// ExchangeCodeForToken exchanges a Facebook authorization code for a permanent access token
+func (c *Client) ExchangeCodeForToken(ctx context.Context, code, appID, appSecret, apiVersion string) (string, error) {
+	url := fmt.Sprintf("%s/%s/oauth/access_token?client_id=%s&client_secret=%s&code=%s",
+		c.getBaseURL(), apiVersion, appID, appSecret, code)
+
+	// OAuth endpoint doesn't require Authorization header, so we make a direct request
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create token exchange request: %w", err)
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("token exchange request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// Parse Meta error using same pattern as doRequest
+		var metaErr MetaAPIError
+		if json.Unmarshal(respBody, &metaErr) == nil && metaErr.Error.Message != "" {
+			return "", fmt.Errorf("token exchange failed: %s", metaErr.Error.Message)
+		}
+		return "", fmt.Errorf("token exchange failed with status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var tokenResp TokenExchangeResponse
+	if err := json.Unmarshal(respBody, &tokenResp); err != nil {
+		return "", fmt.Errorf("failed to parse token response: %w", err)
+	}
+
+	if tokenResp.AccessToken == "" {
+		return "", fmt.Errorf("no access token in response")
+	}
+
+	c.Log.Info("Token exchange successful")
+	return tokenResp.AccessToken, nil
+}
+
+// PhoneNumberInfo represents phone number information from Meta
+type PhoneNumberInfo struct {
+	VerifiedName       string `json:"verified_name"`
+	DisplayPhoneNumber string `json:"display_phone_number"`
+	QualityRating      string `json:"quality_rating"`
+}
+
+// GetPhoneNumberInfo retrieves information about a phone number
+func (c *Client) GetPhoneNumberInfo(ctx context.Context, phoneID, accessToken, apiVersion string) (*PhoneNumberInfo, error) {
+	url := fmt.Sprintf("%s/%s/%s?fields=verified_name,display_phone_number,quality_rating",
+		c.getBaseURL(), apiVersion, phoneID)
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, url, nil, accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get phone number info: %w", err)
+	}
+
+	var info PhoneNumberInfo
+	if err := json.Unmarshal(respBody, &info); err != nil {
+		return nil, fmt.Errorf("failed to parse phone number info: %w", err)
+	}
+
+	return &info, nil
+}
+
+// RegisterPhoneNumber registers a phone number with Two-Step Verification PIN
+func (c *Client) RegisterPhoneNumber(ctx context.Context, phoneID, pin, accessToken, apiVersion string) error {
+	url := fmt.Sprintf("%s/%s/%s/register", c.getBaseURL(), apiVersion, phoneID)
+
+	payload := map[string]string{
+		"messaging_product": "whatsapp",
+		"pin":               pin,
+	}
+
+	_, err := c.doRequest(ctx, http.MethodPost, url, payload, accessToken)
+	if err != nil {
+		return fmt.Errorf("phone registration failed: %w", err)
+	}
+
+	c.Log.Info("Phone number registered successfully", "phone_id", phoneID)
+	return nil
+}
