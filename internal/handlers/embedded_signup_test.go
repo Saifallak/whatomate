@@ -207,6 +207,15 @@ func TestApp_ExchangeToken_MissingFields(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 	user := testutil.CreateTestUser(t, app.DB, org.ID)
 
+	// Mock Meta API server (won't be called but needed for client initialization)
+	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer metaServer.Close()
+
+	// Initialize WhatsApp client
+	app.WhatsApp = whatsapp.NewWithBaseURL(app.Log, metaServer.URL)
+
 	tests := []struct {
 		name string
 		body map[string]interface{}
