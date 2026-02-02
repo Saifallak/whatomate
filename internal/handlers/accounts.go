@@ -439,18 +439,34 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		return nil
 	}
 
+	// LOG: Incoming request from Facebook
+	a.Log.Info("[FB_SIGNUP] Received exchange token request",
+		"code_length", len(req.Code),
+		"phone_id", req.PhoneID,
+		"waba_id", req.WABAID,
+		"name_provided", req.Name != "",
+		"name", req.Name,
+		"webhook_token_provided", req.WebhookVerifyToken != "",
+		"organization_id", orgID)
+
 	if req.Code == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Code is required", nil, "")
 	}
 
 	// 1. Exchange code for user access token using WhatsApp service
 	ctx := context.Background()
+	a.Log.Info("[FB_SIGNUP] Exchanging code for access token",
+		"app_id", a.Config.WhatsApp.AppID,
+		"api_version", a.Config.WhatsApp.APIVersion)
+
 	accessToken, err := a.WhatsApp.ExchangeCodeForToken(ctx, req.Code,
 		a.Config.WhatsApp.AppID, a.Config.WhatsApp.AppSecret, a.Config.WhatsApp.APIVersion)
 	if err != nil {
-		a.Log.Error("Failed to exchange token", "error", err)
+		a.Log.Error("[FB_SIGNUP] Failed to exchange token", "error", err, "code_length", len(req.Code))
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
 	}
+
+	a.Log.Info("[FB_SIGNUP] Token exchange successful", "token_length", len(accessToken))
 
 	// 2. We can now create/update the account
 	var account models.WhatsAppAccount
@@ -461,16 +477,25 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 
 	if req.Name == "" {
 		// Try to fetch name from Meta using WhatsApp service
+		a.Log.Info("[FB_SIGNUP] Fetching phone number info from Meta", "phone_id", req.PhoneID)
 		phoneInfo, err := a.WhatsApp.GetPhoneNumberInfo(ctx, req.PhoneID, accessToken, a.Config.WhatsApp.APIVersion)
 		if err == nil && phoneInfo.VerifiedName != "" {
+			a.Log.Info("[FB_SIGNUP] Phone info retrieved",
+				"verified_name", phoneInfo.VerifiedName,
+				"display_phone_number", phoneInfo.DisplayPhoneNumber,
+				"quality_rating", phoneInfo.QualityRating)
 			req.Name = fmt.Sprintf("%s %s", phoneInfo.VerifiedName, generateNumericPIN(4))
 		} else {
+			if err != nil {
+				a.Log.Warn("[FB_SIGNUP] Failed to fetch phone info", "error", err)
+			}
 			// Safe substring handling
 			suffix := req.PhoneID
 			if len(req.PhoneID) > 4 {
 				suffix = req.PhoneID[len(req.PhoneID)-4:]
 			}
 			req.Name = "WhatsApp Account " + suffix
+			a.Log.Info("[FB_SIGNUP] Using generated account name", "name", req.Name)
 		}
 	}
 
@@ -501,13 +526,18 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 
 	// 3. Attempt Auto-Registration with random PIN using WhatsApp service
 	generatedPin := generateNumericPIN(6)
+	a.Log.Info("[FB_SIGNUP] Attempting auto-registration", "phone_id", account.PhoneID, "pin_length", len(generatedPin))
 	regErr := a.WhatsApp.RegisterPhoneNumber(ctx, account.PhoneID, generatedPin, accessToken, account.APIVersion)
 
 	if regErr == nil {
 		account.Status = "active"
 		account.Pin = generatedPin
+		a.Log.Info("[FB_SIGNUP] Auto-registration successful", "phone_id", account.PhoneID)
 	} else {
-		a.Log.Warn("Auto-registration failed (likely existing PIN or permissions)", "error", regErr)
+		a.Log.Warn("[FB_SIGNUP] Auto-registration failed (likely existing PIN or permissions)",
+			"error", regErr,
+			"phone_id", account.PhoneID,
+			"error_type", fmt.Sprintf("%T", regErr))
 		account.Status = "pending_registration"
 	}
 
@@ -525,12 +555,16 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateWhatsAppAccountCache(account.PhoneID)
 
-	// Log success
-	a.Log.Info("Account created via embedded signup",
+	// Log success with full details
+	a.Log.Info("[FB_SIGNUP] Account created/updated via embedded signup",
 		"account_id", account.ID,
 		"phone_id", account.PhoneID,
+		"waba_id", account.BusinessID,
 		"status", account.Status,
-		"organization_id", orgID)
+		"name", account.Name,
+		"has_pin", account.Pin != "",
+		"organization_id", orgID,
+		"existing_account", existingAccount)
 
 	accResp := accountToResponse(account)
 

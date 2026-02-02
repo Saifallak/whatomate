@@ -174,34 +174,69 @@ function loadFacebookSDK() {
 }
 
 function launchWhatsAppSignup() {
-  if (!isFBSDKLoaded.value || !whatsappConfig.value) {
-    toast.error('Facebook SDK not loaded. Please refresh the page.')
+  if (!isFBSDKLoaded.value) {
+    toast.error('Facebook SDK not loaded yet. Please wait...')
+    return
+  }
+
+  if (!whatsappConfig.value) {
+    toast.error('WhatsApp configuration not loaded')
     return
   }
 
   isConnectingFB.value = true
+  console.log('[FB_SIGNUP] Launching Facebook login with config:', {
+    config_id: whatsappConfig.value.config_id,
+    app_id: whatsappConfig.value.app_id,
+    api_version: whatsappConfig.value.api_version
+  })
 
-  ;(window as any).FB.login(
+  // @ts-ignore
+  window.FB.login(
     (response: any) => {
+      console.log('[FB_SIGNUP] Facebook login response:', JSON.stringify(response, null, 2))
+      
       if (response.authResponse) {
+        console.log('[FB_SIGNUP] Auth response received:', {
+          code_length: response.authResponse.code?.length || 0,
+          has_code: !!response.authResponse.code,
+          phone_number_id: response.authResponse.phone_number_id,
+          waba_id: response.authResponse.waba_id,
+          all_keys: Object.keys(response.authResponse)
+        })
+
         const code = response.authResponse.code
         const phoneNumberId = response.authResponse.phone_number_id
         const wabaId = response.authResponse.waba_id
-        
-        if (!code || !phoneNumberId || !wabaId) {
-          toast.error('Incomplete data from Facebook. Please try again.')
+
+        // Validate required fields
+        if (!code) {
+          console.error('[FB_SIGNUP] Missing code in response')
+          toast.error('Incomplete data from Facebook: missing authorization code')
           isConnectingFB.value = false
           return
         }
-        
+        if (!phoneNumberId) {
+          console.error('[FB_SIGNUP] Missing phone_number_id in response')
+          toast.error('Incomplete data from Facebook: missing phone number ID')
+          isConnectingFB.value = false
+          return
+        }
+        if (!wabaId) {
+          console.error('[FB_SIGNUP] Missing waba_id in response')
+          toast.error('Incomplete data from Facebook: missing WhatsApp Business Account ID')
+          isConnectingFB.value = false
+          return
+        }
+
+        console.log('[FB_SIGNUP] All required fields present, exchanging token...')
         exchangeCodeForToken(code, phoneNumberId, wabaId)
-      } else if (response.status === 'not_authorized') {
-        toast.error('Please authorize the app to continue')
-        isConnectingFB.value = false
       } else if (response.error) {
+        console.error('[FB_SIGNUP] Facebook error:', response.error)
         toast.error(`Facebook error: ${response.error.message || 'Unknown error'}`)
         isConnectingFB.value = false
       } else {
+        console.warn('[FB_SIGNUP] Login cancelled by user')
         toast.error('Facebook login was cancelled')
         isConnectingFB.value = false
       }
@@ -219,17 +254,27 @@ function launchWhatsAppSignup() {
 
 async function exchangeCodeForToken(code: string, phoneNumberId: string, wabaId: string) {
   try {
+    console.log('[FB_SIGNUP] Sending exchange token request:', {
+      code_length: code.length,
+      phone_id: phoneNumberId,
+      waba_id: wabaId
+    })
+
     const response = await api.post('/accounts/exchange-token', { 
       code,
       phone_id: phoneNumberId,
       waba_id: wabaId
     })
+    
+    console.log('[FB_SIGNUP] Exchange token response:', response.data)
     const account = response.data.data
 
     if (account.status === 'pending_registration') {
+      console.log('[FB_SIGNUP] Account pending registration')
       toast.warning('Account created. Phone registration required.')
       // Optionally prompt for PIN here or let user handle it manually
     } else if (account.status === 'active') {
+      console.log('[FB_SIGNUP] Account active, PIN:', account.pin ? 'provided' : 'not provided')
       toast.success('WhatsApp account connected successfully!')
       if (account.pin) {
         // Show PIN to user for future reference
@@ -239,6 +284,7 @@ async function exchangeCodeForToken(code: string, phoneNumberId: string, wabaId:
 
     await fetchAccounts()
   } catch (error: any) {
+    console.error('[FB_SIGNUP] Exchange token error:', error)
     toast.error(getErrorMessage(error, 'Failed to connect WhatsApp account'))
   } finally {
     isConnectingFB.value = false
