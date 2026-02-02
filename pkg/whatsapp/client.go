@@ -744,3 +744,76 @@ func (c *Client) RegisterPhoneNumber(ctx context.Context, phoneID, pin, accessTo
 	c.Log.Info("Phone number registered successfully", "phone_id", phoneID)
 	return nil
 }
+
+// TokenDebugInfo represents the response from the debug_token endpoint
+type TokenDebugInfo struct {
+	AppID               string   `json:"app_id"`
+	Type                string   `json:"type"`
+	Application         string   `json:"application"`
+	DataAccessExpiresAt int64    `json:"data_access_expires_at"`
+	ExpiresAt           int64    `json:"expires_at"`
+	IsValid             bool     `json:"is_valid"`
+	IssuedAt            int64    `json:"issued_at"`
+	Scopes              []string `json:"scopes"`
+	UserID              string   `json:"user_id"`
+	GranularScopes      []struct {
+		Scope     string   `json:"scope"`
+		TargetIds []string `json:"target_ids,omitempty"`
+	} `json:"granular_scopes"`
+}
+
+// GetTokenDebugInfo retrieves information about an access token
+func (c *Client) GetTokenDebugInfo(ctx context.Context, inputToken, accessToken string) (*TokenDebugInfo, error) {
+	url := fmt.Sprintf("%s/debug_token?input_token=%s", c.getBaseURL(), inputToken)
+
+	// debug_token requires an app access token or a user access token
+	respBody, err := c.doRequest(ctx, http.MethodGet, url, nil, accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token debug info: %w", err)
+	}
+
+	var resp struct {
+		Data TokenDebugInfo `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse token debug info: %w", err)
+	}
+
+	return &resp.Data, nil
+}
+
+// SharedWABAResponse represents the response structure for shared WABA request
+type SharedWABAResponse struct {
+	Data []struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Phone struct {
+			Data []struct {
+				ID                 string `json:"id"`
+				DisplayPhoneNumber string `json:"display_phone_number"`
+				VerifiedName       string `json:"verified_name"`
+			} `json:"data"`
+		} `json:"phone_numbers"`
+	} `json:"data"`
+}
+
+// GetSharedWABA discovers the WABA and Phone Number shared with the app
+// This is useful when the embedded signup only returns a code and we need to find the connected account
+func (c *Client) GetSharedWABA(ctx context.Context, accessToken string) (*SharedWABAResponse, error) {
+	// Query /me/accounts to find the WABA and its phone numbers
+	// granular_scopes might be needed to filter this if the user has many accounts,
+	// but for embedded signup, usually only the shared account is accessible or relevant.
+	url := fmt.Sprintf("%s/me/accounts?fields=id,name,phone_numbers{id,display_phone_number,verified_name}", c.getBaseURL())
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, url, nil, accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get shared WABA info: %w", err)
+	}
+
+	var resp SharedWABAResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse shared WABA response: %w", err)
+	}
+
+	return &resp, nil
+}

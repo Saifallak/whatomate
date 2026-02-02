@@ -216,20 +216,18 @@ function launchWhatsAppSignup() {
           isConnectingFB.value = false
           return
         }
-        if (!phoneNumberId) {
-          console.error('[FB_SIGNUP] Missing phone_number_id in response')
-          toast.error('Incomplete data from Facebook: missing phone number ID')
-          isConnectingFB.value = false
-          return
-        }
-        if (!wabaId) {
-          console.error('[FB_SIGNUP] Missing waba_id in response')
-          toast.error('Incomplete data from Facebook: missing WhatsApp Business Account ID')
-          isConnectingFB.value = false
-          return
+
+        // We can now proceed even if phone_number_id or waba_id are missing,
+        // as the backend will attempt to discover them using the code.
+        if (!phoneNumberId || !wabaId) {
+          console.log('[FB_SIGNUP] Missing IDs in response, proceeding with code only (discovery mode)')
         }
 
-        console.log('[FB_SIGNUP] All required fields present, exchanging token...')
+        console.log('[FB_SIGNUP] Exchange token request:', {
+          code_length: code.length,
+          phone_id: phoneNumberId || 'discovery_mode',
+          waba_id: wabaId || 'discovery_mode'
+        })
         exchangeCodeForToken(code, phoneNumberId, wabaId)
       } else if (response.error) {
         console.error('[FB_SIGNUP] Facebook error:', response.error)
@@ -454,22 +452,23 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
       :breadcrumbs="[{ label: 'Settings', href: '/settings' }, { label: 'Accounts' }]"
     >
       <template #actions>
-        <Button 
-          v-if="whatsappConfig?.app_id && whatsappConfig?.config_id"
-          variant="default" 
-          size="sm" 
-          @click="launchWhatsAppSignup"
-          :disabled="isConnectingFB"
-          class="bg-[#1877f2] hover:bg-[#166fe5] text-white"
-        >
-          <Loader2 v-if="isConnectingFB" class="h-4 w-4 mr-2 animate-spin" />
-          <Facebook v-else class="h-4 w-4 mr-2" />
-          Connect with Facebook
-        </Button>
-        <Button variant="outline" size="sm" @click="openCreateDialog">
-          <Plus class="h-4 w-4 mr-2" />
-          Manual Entry
-        </Button>
+        <div class="flex items-center gap-2">
+          <Button 
+            v-if="whatsappConfig?.app_id && whatsappConfig?.config_id"
+            size="sm" 
+            @click="launchWhatsAppSignup"
+            :disabled="isConnectingFB"
+            class="bg-[#1877f2] hover:bg-[#166fe5] text-white border-none shadow-none"
+          >
+            <Loader2 v-if="isConnectingFB" class="h-4 w-4 mr-2 animate-spin" />
+            <Facebook v-else class="h-4 w-4 mr-2" />
+            Connect with Facebook
+          </Button>
+          <Button variant="outline" size="sm" @click="openCreateDialog">
+            <Plus class="h-4 w-4 mr-2" />
+            Manual Entry
+          </Button>
+        </div>
       </template>
     </PageHeader>
 
@@ -708,7 +707,7 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
                 @click="launchWhatsAppSignup" 
                 size="lg" 
                 :disabled="isConnectingFB || !isFBSDKLoaded"
-                class="bg-[#1877f2] hover:bg-[#166fe5] text-white"
+                class="bg-[#1877f2] hover:bg-[#166fe5] text-white border-none shadow-none"
               >
                 <Facebook v-if="!isConnectingFB" class="mr-2 h-5 w-5" />
                 <Loader2 v-else class="mr-2 h-5 w-5 animate-spin" />

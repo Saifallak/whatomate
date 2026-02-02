@@ -430,8 +430,8 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 
 	var req struct {
 		Code               string `json:"code" validate:"required"`
-		PhoneID            string `json:"phone_id" validate:"required"`
-		WABAID             string `json:"waba_id" validate:"required"`
+		PhoneID            string `json:"phone_id"` // Optional: Discovered via token if missing
+		WABAID             string `json:"waba_id"`  // Optional: Discovered via token if missing
 		Name               string `json:"name"`
 		WebhookVerifyToken string `json:"webhook_verify_token"`
 	}
@@ -467,6 +467,40 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	}
 
 	a.Log.Info("[FB_SIGNUP] Token exchange successful", "token_length", len(accessToken))
+
+	// DISCOVERY: If IDs are missing, try to find them using the token
+	if req.PhoneID == "" || req.WABAID == "" {
+		a.Log.Info("[FB_SIGNUP] IDs missing, attempting discovery via token", "phone_provided", req.PhoneID != "", "waba_provided", req.WABAID != "")
+
+		// 1. Try to get shared WABA info
+		sharedInfo, err := a.WhatsApp.GetSharedWABA(ctx, accessToken)
+		if err != nil {
+			a.Log.Error("[FB_SIGNUP] Failed to get shared WABA info", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to retrieve account info from Facebook: "+err.Error(), nil, "")
+		}
+
+		if len(sharedInfo.Data) == 0 {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No WhatsApp Business Account found linked to this user/token", nil, "")
+		}
+
+		// Use the first WABA found
+		waba := sharedInfo.Data[0]
+		req.WABAID = waba.ID
+		a.Log.Info("[FB_SIGNUP] Discovered WABA", "waba_id", req.WABAID, "waba_name", waba.Name)
+
+		// 2. Look for phone number
+		if req.PhoneID == "" {
+			if len(waba.Phone.Data) > 0 {
+				// Use the first phone number found
+				phone := waba.Phone.Data[0]
+				req.PhoneID = phone.ID
+				req.Name = fmt.Sprintf("%s (%s)", phone.VerifiedName, phone.DisplayPhoneNumber)
+				a.Log.Info("[FB_SIGNUP] Discovered Phone", "phone_id", req.PhoneID, "name", req.Name)
+			} else {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No phone number found in the discovered WhatsApp Business Account", nil, "")
+			}
+		}
+	}
 
 	// 2. We can now create/update the account
 	var account models.WhatsAppAccount

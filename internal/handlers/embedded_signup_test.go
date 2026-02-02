@@ -219,6 +219,106 @@ func TestApp_ExchangeToken_InvalidCode(t *testing.T) {
 	assert.Contains(t, body, "Invalid authorization code")
 }
 
+func TestApp_ExchangeToken_Success_CodeOnly_Discovery(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID)
+
+	phoneID := fmt.Sprintf("333456789%d", time.Now().UnixNano()%1000000)
+	wabaID := fmt.Sprintf("777654321%d", time.Now().UnixNano()%1000000)
+
+	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/oauth/access_token"):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"access_token": "discovery_token",
+			})
+		case strings.Contains(path, "/me/accounts"):
+			// Mock shared WABA discovery
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(whatsapp.SharedWABAResponse{
+				Data: []struct {
+					ID    string `json:"id"`
+					Name  string `json:"name"`
+					Phone struct {
+						Data []struct {
+							ID                 string `json:"id"`
+							DisplayPhoneNumber string `json:"display_phone_number"`
+							VerifiedName       string `json:"verified_name"`
+						} `json:"data"`
+					} `json:"phone_numbers"`
+				}{
+					{
+						ID:   wabaID,
+						Name: "Discovered Business",
+						Phone: struct {
+							Data []struct {
+								ID                 string `json:"id"`
+								DisplayPhoneNumber string `json:"display_phone_number"`
+								VerifiedName       string `json:"verified_name"`
+							} `json:"data"`
+						}{
+							Data: []struct {
+								ID                 string `json:"id"`
+								DisplayPhoneNumber string `json:"display_phone_number"`
+								VerifiedName       string `json:"verified_name"`
+							}{
+								{
+									ID:                 phoneID,
+									DisplayPhoneNumber: "+1999999999",
+									VerifiedName:       "Discovered Phone",
+								},
+							},
+						},
+					},
+				},
+			})
+		case strings.Contains(path, phoneID) && strings.Contains(path, "/register"):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		case strings.Contains(path, wabaID) && strings.Contains(path, "/subscribed_apps"):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+		case strings.Contains(path, phoneID): // Phone Info
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"verified_name":        "Discovered Phone",
+				"display_phone_number": "+1999999999",
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer metaServer.Close()
+
+	app.WhatsApp = whatsapp.NewWithBaseURL(app.Log, metaServer.URL)
+
+	// Omit phone_id and waba_id
+	req := testutil.NewJSONRequest(t, map[string]interface{}{
+		"code": "test_code_only",
+	})
+	testutil.SetAuthContext(req, org.ID, user.ID)
+
+	err := app.ExchangeToken(req)
+	require.NoError(t, err)
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+	var resp struct {
+		Data map[string]interface{} `json:"data"`
+	}
+	err = json.Unmarshal(testutil.GetResponseBody(req), &resp)
+	require.NoError(t, err)
+
+	assert.Equal(t, "active", resp.Data["status"])
+	assert.Equal(t, phoneID, resp.Data["phone_id"])
+	assert.Equal(t, wabaID, resp.Data["business_id"])
+	assert.Equal(t, "v24.0", resp.Data["api_version"])
+}
+
 func TestApp_ExchangeToken_MissingFields(t *testing.T) {
 	t.Parallel()
 
