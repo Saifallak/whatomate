@@ -27,6 +27,10 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 	user := testutil.CreateTestUser(t, app.DB, org.ID)
 
+	// Use unique IDs to prevent conflicts with parallel tests
+	phoneID := fmt.Sprintf("123456789%d", time.Now().UnixNano()%1000000)
+	wabaID := fmt.Sprintf("987654321%d", time.Now().UnixNano()%1000000)
+
 	// Mock Meta API server
 	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -37,18 +41,20 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "EAABwzLixnjYBO1234567890",
 			})
-		case path == "/v21.0/123456789" || path == "/123456789":
-			// Phone info - use timestamp to ensure unique account names
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"verified_name":        fmt.Sprintf("Test Business %d", time.Now().UnixNano()),
-				"display_phone_number": "+1234567890",
-			})
-		case path == "/v21.0/123456789/register" || path == "/123456789/register":
-			// Registration
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
-		case path == "/v21.0/987654321/subscribed_apps" || path == "/987654321/subscribed_apps":
+		case strings.Contains(path, phoneID):
+			if strings.HasSuffix(path, "/register") {
+				// Registration
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
+			} else {
+				// Phone info - use timestamp to ensure unique account names
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"verified_name":        fmt.Sprintf("Test Business %d", time.Now().UnixNano()),
+					"display_phone_number": "+1234567890",
+				})
+			}
+		case strings.Contains(path, wabaID):
 			// Webhook subscription
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
@@ -63,8 +69,8 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 
 	req := testutil.NewJSONRequest(t, map[string]interface{}{
 		"code":     "test_auth_code_123",
-		"phone_id": "123456789",
-		"waba_id":  "987654321",
+		"phone_id": phoneID,
+		"waba_id":  wabaID,
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
@@ -78,13 +84,13 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 	err = json.Unmarshal(testutil.GetResponseBody(req), &resp)
 	require.NoError(t, err)
 	assert.Equal(t, "active", resp.Data["status"])
-	assert.Equal(t, "123456789", resp.Data["phone_id"])
-	assert.Equal(t, "987654321", resp.Data["business_id"])
+	assert.Equal(t, phoneID, resp.Data["phone_id"])
+	assert.Equal(t, wabaID, resp.Data["business_id"])
 	assert.NotEmpty(t, resp.Data["pin"]) // PIN should be returned
 
 	// Verify account was created in database
 	var account models.WhatsAppAccount
-	err = app.DB.Where("phone_id = ? AND organization_id = ?", "123456789", org.ID).First(&account).Error
+	err = app.DB.Where("phone_id = ? AND organization_id = ?", phoneID, org.ID).First(&account).Error
 	require.NoError(t, err)
 	assert.Equal(t, "active", account.Status)
 	assert.NotEmpty(t, account.Pin)
@@ -98,6 +104,10 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 	org := testutil.CreateTestOrganization(t, app.DB)
 	user := testutil.CreateTestUser(t, app.DB, org.ID)
 
+	// Use unique IDs to prevent conflicts with parallel tests
+	phoneID := fmt.Sprintf("223456789%d", time.Now().UnixNano()%1000000)
+	wabaID := fmt.Sprintf("887654321%d", time.Now().UnixNano()%1000000)
+
 	// Mock Meta API server - registration fails (PIN already exists)
 	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -107,31 +117,33 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "test_token",
 			})
-		case path == "/v21.0/123456789" || path == "/123456789":
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"verified_name": fmt.Sprintf("Test Business %d", time.Now().UnixNano()),
-			})
-		case path == "/v21.0/123456789/register" || path == "/123456789/register":
-			// Registration fails - PIN already exists
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(whatsapp.MetaAPIError{
-				Error: struct {
-					Message      string `json:"message"`
-					Type         string `json:"type"`
-					Code         int    `json:"code"`
-					ErrorSubcode int    `json:"error_subcode"`
-					ErrorUserMsg string `json:"error_user_msg"`
-					ErrorData    struct {
-						Details string `json:"details"`
-					} `json:"error_data"`
-					FBTraceID string `json:"fbtrace_id"`
-				}{
-					Message: "Two-step verification is already enabled",
-					Code:    33,
-				},
-			})
-		case path == "/v21.0/987654321/subscribed_apps" || path == "/987654321/subscribed_apps":
+		case strings.Contains(path, phoneID):
+			if strings.HasSuffix(path, "/register") {
+				// Registration fails - PIN already exists
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(whatsapp.MetaAPIError{
+					Error: struct {
+						Message      string `json:"message"`
+						Type         string `json:"type"`
+						Code         int    `json:"code"`
+						ErrorSubcode int    `json:"error_subcode"`
+						ErrorUserMsg string `json:"error_user_msg"`
+						ErrorData    struct {
+							Details string `json:"details"`
+						} `json:"error_data"`
+						FBTraceID string `json:"fbtrace_id"`
+					}{
+						Message: "Two-step verification is already enabled",
+						Code:    33,
+					},
+				})
+			} else {
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"verified_name": fmt.Sprintf("Test Business %d", time.Now().UnixNano()),
+				})
+			}
+		case strings.Contains(path, wabaID):
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})
 		default:
@@ -144,8 +156,8 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 
 	req := testutil.NewJSONRequest(t, map[string]interface{}{
 		"code":     "test_code",
-		"phone_id": "123456789",
-		"waba_id":  "987654321",
+		"phone_id": phoneID,
+		"waba_id":  wabaID,
 	})
 	testutil.SetAuthContext(req, org.ID, user.ID)
 
