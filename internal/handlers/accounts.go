@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -648,6 +647,12 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	// Include PIN only if registration succeeded
 	if account.Status == "active" && account.Pin != "" {
 		response["pin"] = account.Pin
+	}
+
+	// Add warning if registration failed so UI can show "Retry Register"
+	if regErr != nil {
+		response["warning"] = "Registration failed: " + regErr.Error()
+		response["registration_error"] = regErr.Error()
 	}
 
 	return r.SendEnvelope(response)
