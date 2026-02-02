@@ -237,46 +237,44 @@ func TestApp_ExchangeToken_Success_CodeOnly_Discovery(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "discovery_token",
 			})
-		case strings.Contains(path, "/me/accounts"):
-			// Mock shared WABA discovery
+		case strings.Contains(path, "/debug_token"):
 			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(whatsapp.SharedWABAResponse{
-				Data: []struct {
-					ID    string `json:"id"`
-					Name  string `json:"name"`
-					Phone struct {
-						Data []struct {
-							ID                 string `json:"id"`
-							DisplayPhoneNumber string `json:"display_phone_number"`
-							VerifiedName       string `json:"verified_name"`
-						} `json:"data"`
-					} `json:"phone_numbers"`
-				}{
-					{
-						ID:   wabaID,
-						Name: "Discovered Business",
-						Phone: struct {
-							Data []struct {
-								ID                 string `json:"id"`
-								DisplayPhoneNumber string `json:"display_phone_number"`
-								VerifiedName       string `json:"verified_name"`
-							} `json:"data"`
-						}{
-							Data: []struct {
-								ID                 string `json:"id"`
-								DisplayPhoneNumber string `json:"display_phone_number"`
-								VerifiedName       string `json:"verified_name"`
-							}{
-								{
-									ID:                 phoneID,
-									DisplayPhoneNumber: "+1999999999",
-									VerifiedName:       "Discovered Phone",
-								},
-							},
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"data": whatsapp.TokenDebugInfo{
+					AppID:   "test_app",
+					IsValid: true,
+					GranularScopes: []struct {
+						Scope     string   `json:"scope"`
+						TargetIds []string `json:"target_ids,omitempty"`
+					}{
+						{
+							Scope:     "whatsapp_business_management",
+							TargetIds: []string{wabaID},
 						},
 					},
 				},
 			})
+		case strings.Contains(path, wabaID) && strings.Contains(path, "/phone_numbers"):
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(whatsapp.WABAPhoneNumbersResponse{
+				Data: []struct {
+					ID                 string `json:"id"`
+					DisplayPhoneNumber string `json:"display_phone_number"`
+					VerifiedName       string `json:"verified_name"`
+					QualityRating      string `json:"quality_rating"`
+				}{
+					{
+						ID:                 phoneID,
+						DisplayPhoneNumber: "+1999999999",
+						VerifiedName:       "Discovered Phone",
+						QualityRating:      "GREEN",
+					},
+				},
+			})
+		case strings.Contains(path, "/me/accounts"):
+			// Fallback mock (should not be reached if debug_token works)
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(whatsapp.SharedWABAResponse{})
 		case strings.Contains(path, phoneID) && strings.Contains(path, "/register"):
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]bool{"success": true})

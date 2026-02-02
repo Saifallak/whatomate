@@ -817,3 +817,30 @@ func (c *Client) GetSharedWABA(ctx context.Context, accessToken string) (*Shared
 
 	return &resp, nil
 }
+
+// WABAPhoneNumbersResponse represents the response containing phone numbers for a WABA
+type WABAPhoneNumbersResponse struct {
+	Data []struct {
+		ID                 string `json:"id"`
+		DisplayPhoneNumber string `json:"display_phone_number"`
+		VerifiedName       string `json:"verified_name"`
+		QualityRating      string `json:"quality_rating"`
+	} `json:"data"`
+}
+
+// GetWABAPhoneNumbers retrieves all phone numbers associated with a WABA
+func (c *Client) GetWABAPhoneNumbers(ctx context.Context, wabaID, accessToken string) (*WABAPhoneNumbersResponse, error) {
+	url := fmt.Sprintf("%s/%s/phone_numbers?fields=id,display_phone_number,verified_name,quality_rating", c.getBaseURL(), wabaID)
+
+	respBody, err := c.doRequest(ctx, http.MethodGet, url, nil, accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get WABA phone numbers: %w", err)
+	}
+
+	var resp WABAPhoneNumbersResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse WABA phone numbers response: %w", err)
+	}
+
+	return &resp, nil
+}

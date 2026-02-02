@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -470,43 +471,76 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 
 	// DISCOVERY: If IDs are missing, try to find them using the token
 	if req.PhoneID == "" || req.WABAID == "" {
-		a.Log.Info("[FB_SIGNUP] IDs missing, attempting discovery via token", "phone_provided", req.PhoneID != "", "waba_provided", req.WABAID != "")
+		a.Log.Info("[FB_SIGNUP] IDs missing, attempting discovery via debug_token")
 
-		// 1. Try to get shared WABA info
-		sharedInfo, err := a.WhatsApp.GetSharedWABA(ctx, accessToken)
+		// 1. Debug the token to find the WABA ID in granular_scopes
+		appAccessToken := fmt.Sprintf("%s|%s", a.Config.WhatsApp.AppID, a.Config.WhatsApp.AppSecret)
+
+		debugInfo, err := a.WhatsApp.GetTokenDebugInfo(ctx, accessToken, appAccessToken)
 		if err != nil {
-			a.Log.Error("[FB_SIGNUP] Failed to get shared WABA info", "error", err)
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to retrieve account info from Facebook: "+err.Error(), nil, "")
+			a.Log.Error("[FB_SIGNUP] Failed to debug token", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to validate token details: "+err.Error(), nil, "")
 		}
 
-		if len(sharedInfo.Data) == 0 {
-			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No WhatsApp Business Account found linked to this user/token", nil, "")
-		}
-
-		// Use the first WABA found
-		waba := sharedInfo.Data[0]
-		req.WABAID = waba.ID
-		a.Log.Info("[FB_SIGNUP] Discovered WABA", "waba_id", req.WABAID, "waba_name", waba.Name)
-
-		// 2. Look for phone number
-		if req.PhoneID == "" {
-			if len(waba.Phone.Data) > 0 {
-				// Use the first phone number found
-				phone := waba.Phone.Data[0]
-				req.PhoneID = phone.ID
-				req.Name = fmt.Sprintf("%s (%s)", phone.VerifiedName, phone.DisplayPhoneNumber)
-				a.Log.Info("[FB_SIGNUP] Discovered Phone", "phone_id", req.PhoneID, "name", req.Name)
-			} else {
-				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No phone number found in the discovered WhatsApp Business Account", nil, "")
+		// 2. Find WABA ID from Granular Scopes
+		// Scope: whatsapp_business_management
+		var discoveredWABAID string
+		for _, scope := range debugInfo.GranularScopes {
+			if scope.Scope == "whatsapp_business_management" {
+				if len(scope.TargetIds) > 0 {
+					discoveredWABAID = scope.TargetIds[0]
+					break
+				}
 			}
+		}
+
+		if discoveredWABAID == "" {
+			a.Log.Warn("[FB_SIGNUP] No WABA ID found in granular scopes, falling back to /me/accounts strategy")
+			// Fallback to old strategy if granular scope is missing
+			sharedInfo, err := a.WhatsApp.GetSharedWABA(ctx, accessToken)
+			if err == nil && len(sharedInfo.Data) > 0 {
+				discoveredWABAID = sharedInfo.Data[0].ID
+			}
+		}
+
+		if discoveredWABAID == "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Could not discover WhatsApp Business Account ID from token", nil, "")
+		}
+
+		req.WABAID = discoveredWABAID
+		a.Log.Info("[FB_SIGNUP] Discovered WABA ID", "waba_id", req.WABAID)
+
+		// 3. Fetch Phone Numbers for this WABA
+		if req.PhoneID == "" {
+			phonesResp, err := a.WhatsApp.GetWABAPhoneNumbers(ctx, req.WABAID, accessToken)
+			if err != nil {
+				a.Log.Error("[FB_SIGNUP] Failed to fetch phone numbers", "error", err)
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to fetch phone numbers from WABA: "+err.Error(), nil, "")
+			}
+
+			if len(phonesResp.Data) == 0 {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No phone numbers found in this WhatsApp Business Account", nil, "")
+			}
+
+			// User selects only ONE account in the flow, so we take the first one found.
+			phone := phonesResp.Data[0]
+			req.PhoneID = phone.ID
+			req.Name = fmt.Sprintf("%s (%s)", phone.VerifiedName, phone.DisplayPhoneNumber)
+			a.Log.Info("[FB_SIGNUP] Discovered Phone", "phone_id", req.PhoneID, "name", req.Name)
 		}
 	}
 
 	// 2. We can now create/update the account
 	var account models.WhatsAppAccount
 	var existingAccount bool
-	if err := a.DB.Where("phone_id = ? AND organization_id = ?", req.PhoneID, orgID).First(&account).Error; err == nil {
+	// Use Unscoped to find even soft-deleted accounts to avoid unique constraint violations
+	if err := a.DB.Unscoped().Where("phone_id = ? AND organization_id = ?", req.PhoneID, orgID).First(&account).Error; err == nil {
 		existingAccount = true
+		// If it was deleted, we need to restore it (reset deleted_at)
+		if account.DeletedAt.Valid {
+			account.DeletedAt.Valid = false
+			account.DeletedAt.Time = time.Time{}
+		}
 	}
 
 	if req.Name == "" {
@@ -575,10 +609,9 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		account.Status = "pending_registration"
 	}
 
-	// 4. Subscribe app to WABA webhooks using existing WhatsApp service
+	// 4. Subscribe app to WABA webhooks
 	if err := a.WhatsApp.SubscribeApp(ctx, a.toWhatsAppAccount(&account)); err != nil {
 		a.Log.Error("Failed to subscribe app to WABA", "error", err)
-		// Don't fail the whole operation if subscription fails
 	}
 
 	if err := a.DB.Save(&account).Error; err != nil {
@@ -612,14 +645,9 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 		"business_id":          accResp.BusinessID,
 		"webhook_verify_token": accResp.WebhookVerifyToken,
 		"api_version":          accResp.APIVersion,
-		"is_default_incoming":  accResp.IsDefaultIncoming,
-		"is_default_outgoing":  accResp.IsDefaultOutgoing,
-		"auto_read_receipt":    accResp.AutoReadReceipt,
 		"status":               accResp.Status,
 		"has_access_token":     accResp.HasAccessToken,
-		"has_app_secret":       accResp.HasAppSecret,
 		"created_at":           accResp.CreatedAt,
-		"updated_at":           accResp.UpdatedAt,
 	}
 
 	// Include PIN only if registration succeeded
