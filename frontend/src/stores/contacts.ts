@@ -74,11 +74,12 @@ export const useContactsStore = defineStore('contacts', () => {
   const isLoadingOlderMessages = ref(false)
   const hasMoreMessages = ref(false)
   const searchQuery = ref('')
+  const selectedTags = ref<string[]>([])
   const replyingTo = ref<Message | null>(null)
 
   // Contacts pagination
   const contactsPage = ref(1)
-  const contactsLimit = ref(50)
+  const contactsLimit = ref(25)
   const contactsTotal = ref(0)
   const isLoadingMoreContacts = ref(false)
   const hasMoreContacts = computed(() => contacts.value.length < contactsTotal.value)
@@ -101,12 +102,14 @@ export const useContactsStore = defineStore('contacts', () => {
     })
   })
 
-  async function fetchContacts(params?: { search?: string; page?: number; limit?: number }) {
+  async function fetchContacts(params?: { search?: string; page?: number; limit?: number; tags?: string }) {
     isLoading.value = true
     try {
+      const tagsParam = selectedTags.value.length > 0 ? selectedTags.value.join(',') : undefined
       const response = await contactsService.list({
         page: 1,
         limit: contactsLimit.value,
+        tags: tagsParam,
         ...params
       })
       // API returns { status: "success", data: { contacts: [...], total: number } }
@@ -121,15 +124,21 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  function setContactsLimit(limit: number) {
+    contactsLimit.value = limit
+  }
+
   async function loadMoreContacts() {
     if (isLoadingMoreContacts.value || !hasMoreContacts.value) return
 
     isLoadingMoreContacts.value = true
     try {
       const nextPage = contactsPage.value + 1
+      const tagsParam = selectedTags.value.length > 0 ? selectedTags.value.join(',') : undefined
       const response = await contactsService.list({
         page: nextPage,
-        limit: contactsLimit.value
+        limit: contactsLimit.value,
+        tags: tagsParam
       })
       const data = response.data.data || response.data
       const newContacts = data.contacts || []
@@ -306,13 +315,16 @@ export const useContactsStore = defineStore('contacts', () => {
     isLoadingOlderMessages,
     hasMoreMessages,
     searchQuery,
+    selectedTags,
     replyingTo,
     filteredContacts,
     sortedContacts,
     // Contacts pagination
+    contactsLimit,
     contactsTotal,
     hasMoreContacts,
     isLoadingMoreContacts,
+    setContactsLimit,
     fetchContacts,
     loadMoreContacts,
     // Other

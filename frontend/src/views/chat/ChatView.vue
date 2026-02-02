@@ -7,6 +7,9 @@ import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { wsService } from '@/services/websocket'
 import { contactsService, chatbotService, messagesService, customActionsService, type CustomAction, type ActionResult } from '@/services/api'
+import { useTagsStore } from '@/stores/tags'
+import { TagBadge } from '@/components/ui/tag-badge'
+import { getTagColorClass } from '@/lib/constants'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -78,10 +81,12 @@ import {
   Mail,
   Globe,
   Code,
-  RotateCw
+  RotateCw,
+  Filter
 } from 'lucide-vue-next'
 import { getInitials } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
+import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import { Info } from 'lucide-vue-next'
@@ -115,11 +120,11 @@ const contactsStore = useContactsStore()
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 const transfersStore = useTransfersStore()
+const tagsStore = useTagsStore()
 const { isDark } = useColorMode()
 
 const messageInput = ref('')
 const messagesEndRef = ref<HTMLElement | null>(null)
-const messagesScrollAreaRef = ref<InstanceType<typeof ScrollArea> | null>(null)
 const messageInputRef = ref<HTMLTextAreaElement | null>(null)
 const isSending = ref(false)
 const isAssignDialogOpen = ref(false)
@@ -155,6 +160,38 @@ const emojiPickerOpen = ref(false)
 // Custom actions state
 const customActions = ref<CustomAction[]>([])
 const executingActionId = ref<string | null>(null)
+
+// Tags filter state
+const isTagFilterOpen = ref(false)
+
+// Infinite scroll for contacts (load more at bottom)
+const contactsScroll = useInfiniteScroll({
+  direction: 'bottom',
+  onLoadMore: () => contactsStore.loadMoreContacts(),
+  hasMore: computed(() => contactsStore.hasMoreContacts),
+  isLoading: computed(() => contactsStore.isLoadingMoreContacts)
+})
+
+// Infinite scroll for messages (load older at top)
+const messagesScroll = useInfiniteScroll({
+  direction: 'top',
+  onLoadMore: async () => {
+    if (!contactsStore.currentContact) return
+    await messagesScroll.preserveScrollPosition(async () => {
+      await contactsStore.fetchOlderMessages(contactsStore.currentContact!.id)
+      await nextTick()
+      // Load media for any new messages
+      try {
+        loadMediaForMessages()
+      } catch (e) {
+        console.error('Error loading media:', e)
+      }
+    })
+  },
+  hasMore: computed(() => contactsStore.hasMoreMessages),
+  isLoading: computed(() => contactsStore.isLoadingOlderMessages),
+  onScroll: (event) => updateStickyDate(event.target as HTMLElement)
+})
 
 const contactId = computed(() => route.params.contactId as string | undefined)
 
@@ -217,6 +254,22 @@ async function fetchCustomActions() {
     // Silently fail - custom actions are optional
     console.error('Failed to fetch custom actions:', error)
   }
+}
+
+function toggleTagFilter(tagName: string) {
+  const index = contactsStore.selectedTags.indexOf(tagName)
+  if (index === -1) {
+    contactsStore.selectedTags.push(tagName)
+  } else {
+    contactsStore.selectedTags.splice(index, 1)
+  }
+  // Refetch contacts with new filter
+  contactsStore.fetchContacts()
+}
+
+function clearTagFilter() {
+  contactsStore.selectedTags = []
+  contactsStore.fetchContacts()
 }
 
 async function executeCustomAction(action: CustomAction) {
@@ -313,6 +366,10 @@ onMounted(async () => {
 
   await contactsStore.fetchContacts()
 
+  // Setup infinite scroll for contacts list
+  await nextTick()
+  contactsScroll.setup()
+
   // Fetch transfers to track active transfers
   transfersStore.fetchTransfers({ status: 'active' })
 
@@ -326,6 +383,11 @@ onMounted(async () => {
   // Fetch custom actions for admins/managers
   if (canAssignContacts.value) {
     fetchCustomActions()
+  }
+
+  // Fetch available tags for filtering (if not already loaded)
+  if (tagsStore.tags.length === 0) {
+    tagsStore.fetchTags().catch(() => {})
   }
 
   if (contactId.value) {
@@ -342,75 +404,9 @@ onUnmounted(() => {
     URL.revokeObjectURL(url)
   })
   mediaBlobUrls.value = {}
-  // Remove scroll listener
-  removeScrollListener()
   // Clear sticky date timeout
   if (stickyDateTimeout) clearTimeout(stickyDateTimeout)
 })
-
-// Infinite scroll for loading older messages
-let scrollViewport: HTMLElement | null = null
-
-function setupScrollListener() {
-  // Get the viewport element from ScrollArea
-  const scrollArea = messagesScrollAreaRef.value?.$el
-  if (scrollArea) {
-    // Find the scrollable viewport - it's the element with overflow:scroll/auto
-    // Try data attributes first, then find by computed style
-    scrollViewport = scrollArea.querySelector('[data-reka-scroll-area-viewport]') ||
-                     scrollArea.querySelector('[data-radix-scroll-area-viewport]')
-
-    if (!scrollViewport) {
-      // Fallback: find child element that has overflow scroll/auto
-      const children = scrollArea.querySelectorAll('*')
-      for (const child of children) {
-        const style = window.getComputedStyle(child)
-        if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
-          scrollViewport = child as HTMLElement
-          break
-        }
-      }
-    }
-
-    if (scrollViewport) {
-      scrollViewport.addEventListener('scroll', handleScroll)
-    }
-  }
-}
-
-function removeScrollListener() {
-  if (scrollViewport) {
-    scrollViewport.removeEventListener('scroll', handleScroll)
-    scrollViewport = null
-  }
-}
-
-async function handleScroll(event: Event) {
-  const target = event.target as HTMLElement
-
-  // Update sticky date header
-  updateStickyDate(target)
-
-  // Trigger load when scrolled near top (within 100px)
-  if (target.scrollTop < 100 && contactsStore.hasMoreMessages && !contactsStore.isLoadingOlderMessages) {
-    const currentScrollHeight = target.scrollHeight
-    const currentScrollTop = target.scrollTop
-
-    await contactsStore.fetchOlderMessages(contactsStore.currentContact!.id)
-
-    // Preserve scroll position after prepending messages
-    await nextTick()
-    const newScrollHeight = target.scrollHeight
-    target.scrollTop = newScrollHeight - currentScrollHeight + currentScrollTop
-
-    // Load media for any new messages
-    try {
-      loadMediaForMessages()
-    } catch (e) {
-      console.error('Error loading media:', e)
-    }
-  }
-}
 
 function updateStickyDate(scrollContainer: HTMLElement) {
   // Find all date separator elements
@@ -461,7 +457,7 @@ async function selectContact(id: string) {
   const contact = contactsStore.contacts.find(c => c.id === id)
   if (contact) {
     // Remove old scroll listener before switching contacts
-    removeScrollListener()
+    messagesScroll.cleanup()
 
     contactsStore.setCurrentContact(contact)
     await contactsStore.fetchMessages(id)
@@ -479,7 +475,7 @@ async function selectContact(id: string) {
     setTimeout(() => {
       scrollToBottom(true)
       // Setup scroll listener for infinite scroll after initial scroll
-      setupScrollListener()
+      messagesScroll.setup()
     }, 50)
 
     // Fetch session data and auto-open panel if configured
@@ -1182,18 +1178,85 @@ async function sendMediaMessage() {
     <div class="w-80 border-r border-white/[0.08] light:border-gray-200 flex flex-col bg-[#0a0a0b] light:bg-white">
       <!-- Search Header -->
       <div class="p-2 border-b border-white/[0.08] light:border-gray-200">
-        <div class="relative">
-          <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40 light:text-gray-400" />
-          <Input
-            v-model="contactsStore.searchQuery"
-            placeholder="Search contacts..."
-            class="pl-8 h-8 text-sm bg-white/[0.04] border-white/[0.1] text-white placeholder:text-white/40 light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:placeholder:text-gray-400"
-          />
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1">
+            <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40 light:text-gray-400" />
+            <Input
+              v-model="contactsStore.searchQuery"
+              placeholder="Search contacts..."
+              class="pl-8 h-8 text-sm bg-white/[0.04] border-white/[0.1] text-white placeholder:text-white/40 light:bg-gray-50 light:border-gray-200 light:text-gray-900 light:placeholder:text-gray-400"
+            />
+          </div>
+          <!-- Tag Filter -->
+          <Popover v-model:open="isTagFilterOpen">
+            <PopoverTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-8 w-8 shrink-0 relative"
+                :class="contactsStore.selectedTags.length > 0 ? 'text-emerald-400 bg-emerald-500/10' : 'text-white/40 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100'"
+              >
+                <Filter class="h-4 w-4" />
+                <span v-if="contactsStore.selectedTags.length > 0" class="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-emerald-500 text-[10px] text-white flex items-center justify-center">
+                  {{ contactsStore.selectedTags.length }}
+                </span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" class="w-56 p-2">
+              <div class="space-y-2">
+                <div class="flex items-center justify-between px-1">
+                  <span class="text-sm font-medium">Filter by tags</span>
+                  <Button
+                    v-if="contactsStore.selectedTags.length > 0"
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 px-2 text-xs"
+                    @click="clearTagFilter"
+                  >
+                    Clear
+                  </Button>
+                </div>
+                <Separator />
+                <div v-if="tagsStore.tags.length === 0" class="py-2 text-center text-sm text-muted-foreground">
+                  No tags available
+                </div>
+                <div v-else class="space-y-1 max-h-48 overflow-y-auto">
+                  <button
+                    v-for="tag in tagsStore.tags"
+                    :key="tag.name"
+                    class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/[0.08] light:hover:bg-gray-100 transition-colors"
+                    :class="contactsStore.selectedTags.includes(tag.name) && 'bg-white/[0.08] light:bg-gray-100'"
+                    @click="toggleTagFilter(tag.name)"
+                  >
+                    <span :class="['w-2 h-2 rounded-full shrink-0', getTagColorClass(tag.color).split(' ')[0]]" />
+                    <span class="flex-1 text-left truncate">{{ tag.name }}</span>
+                    <Check
+                      v-if="contactsStore.selectedTags.includes(tag.name)"
+                      class="h-4 w-4 text-emerald-400 shrink-0"
+                    />
+                  </button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+        <!-- Active tag filters -->
+        <div v-if="contactsStore.selectedTags.length > 0" class="flex flex-wrap gap-1 mt-2">
+          <TagBadge
+            v-for="tagName in contactsStore.selectedTags"
+            :key="tagName"
+            :color="tagsStore.getTagByName(tagName)?.color"
+            class="cursor-pointer hover:opacity-80"
+            @click="toggleTagFilter(tagName)"
+          >
+            {{ tagName }}
+            <X class="h-3 w-3 ml-1" />
+          </TagBadge>
         </div>
       </div>
 
       <!-- Contacts -->
-      <ScrollArea class="flex-1">
+      <ScrollArea :ref="(el: any) => contactsScroll.scrollAreaRef.value = el" class="flex-1">
         <div class="py-1">
           <div
             v-for="contact in contactsStore.sortedContacts"
@@ -1230,18 +1293,9 @@ async function sendMediaMessage() {
             </div>
           </div>
 
-          <!-- Load more indicator -->
-          <div v-if="contactsStore.hasMoreContacts" class="p-3 text-center">
-            <Button
-              v-if="!contactsStore.isLoadingMoreContacts"
-              variant="ghost"
-              size="sm"
-              class="text-white/50 hover:text-white hover:bg-white/[0.04] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
-              @click="contactsStore.loadMoreContacts()"
-            >
-              Load more ({{ contactsStore.sortedContacts.length }} of {{ contactsStore.contactsTotal }})
-            </Button>
-            <Loader2 v-else class="h-5 w-5 mx-auto animate-spin text-white/40 light:text-gray-400" />
+          <!-- Loading indicator for infinite scroll -->
+          <div v-if="contactsStore.isLoadingMoreContacts" class="p-3 text-center">
+            <Loader2 class="h-5 w-5 mx-auto animate-spin text-white/40 light:text-gray-400" />
           </div>
 
           <div v-if="contactsStore.sortedContacts.length === 0" class="p-3 text-center text-white/40 light:text-gray-500">
@@ -1382,7 +1436,7 @@ async function sendMediaMessage() {
             </div>
           </Transition>
 
-          <ScrollArea ref="messagesScrollAreaRef" class="h-full p-3 chat-background">
+          <ScrollArea :ref="(el: any) => messagesScroll.scrollAreaRef.value = el" class="h-full p-3 chat-background">
             <div class="space-y-2">
               <!-- Loading indicator for older messages -->
               <div v-if="contactsStore.isLoadingOlderMessages" class="flex justify-center py-2">
