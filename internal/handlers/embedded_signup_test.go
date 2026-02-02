@@ -2,10 +2,12 @@ package handlers_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -36,10 +38,10 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 				"access_token": "EAABwzLixnjYBO1234567890",
 			})
 		case path == "/v21.0/123456789" || path == "/123456789":
-			// Phone info
+			// Phone info - use timestamp to ensure unique account names
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
-				"verified_name":        "Test Business",
+				"verified_name":        fmt.Sprintf("Test Business %d", time.Now().UnixNano()),
 				"display_phone_number": "+1234567890",
 			})
 		case path == "/v21.0/123456789/register" || path == "/123456789/register":
@@ -108,7 +110,7 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 		case path == "/v21.0/123456789" || path == "/123456789":
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
-				"verified_name": "Test Business",
+				"verified_name": fmt.Sprintf("Test Business %d", time.Now().UnixNano()),
 			})
 		case path == "/v21.0/123456789/register" || path == "/123456789/register":
 			// Registration fails - PIN already exists
