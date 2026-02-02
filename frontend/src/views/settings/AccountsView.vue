@@ -704,7 +704,12 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
               Connect your WhatsApp Business account via Facebook for quick setup, or use manual entry if you have your credentials ready.
             </p>
             <div class="flex gap-3 justify-center">
-              <Button @click="launchWhatsAppSignup" size="lg" :disabled="isConnectingFB || !isFBSDKLoaded">
+              <Button 
+                @click="launchWhatsAppSignup" 
+                size="lg" 
+                :disabled="isConnectingFB || !isFBSDKLoaded"
+                class="bg-[#1877f2] hover:bg-[#166fe5] text-white"
+              >
                 <Facebook v-if="!isConnectingFB" class="mr-2 h-5 w-5" />
                 <Loader2 v-else class="mr-2 h-5 w-5 animate-spin" />
                 Connect with Facebook
