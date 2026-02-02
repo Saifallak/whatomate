@@ -87,6 +87,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	// Pagination
 	pg := parsePagination(r)
 	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+	tagsParam := string(r.RequestCtx.QueryArgs().Peek("tags"))
 
 	var contacts []models.Contact
 	query := a.ScopeToOrg(a.DB, userID, orgID)
@@ -99,6 +100,25 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	if search != "" {
 		searchPattern := "%" + search + "%"
 		query = query.Where("phone_number LIKE ? OR profile_name LIKE ?", searchPattern, searchPattern)
+	}
+
+	// Filter by tags (comma-separated, matches contacts that have ANY of the specified tags)
+	if tagsParam != "" {
+		tagList := strings.Split(tagsParam, ",")
+		// Trim whitespace from each tag and build OR conditions
+		// Using @> operator which leverages the GIN index on tags
+		conditions := make([]string, 0, len(tagList))
+		args := make([]any, 0, len(tagList))
+		for _, tag := range tagList {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				conditions = append(conditions, "tags @> ?")
+				args = append(args, fmt.Sprintf(`[%q]`, tag)) // JSON array: ["tagname"]
+			}
+		}
+		if len(conditions) > 0 {
+			query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
+		}
 	}
 
 	// Order by last message time (most recent first)
