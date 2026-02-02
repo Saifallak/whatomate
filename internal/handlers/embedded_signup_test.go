@@ -29,9 +29,8 @@ func TestApp_ExchangeToken_Success_AutoRegistration(t *testing.T) {
 	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
-		case path == "/v21.0/oauth/access_token" || path == "/oauth/access_token" ||
-			strings.HasPrefix(path, "/v21.0/oauth/access_token") || strings.HasPrefix(path, "/oauth/access_token"):
-			// Token exchange (may have query parameters)
+		case strings.Contains(path, "/oauth/access_token"):
+			// Token exchange (query parameters are in r.URL.RawQuery, not path)
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "EAABwzLixnjYBO1234567890",
@@ -101,8 +100,7 @@ func TestApp_ExchangeToken_Success_PendingRegistration(t *testing.T) {
 	metaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
-		case path == "/v21.0/oauth/access_token" || path == "/oauth/access_token" ||
-			strings.HasPrefix(path, "/v21.0/oauth/access_token") || strings.HasPrefix(path, "/oauth/access_token"):
+		case strings.Contains(path, "/oauth/access_token"):
 			w.WriteHeader(http.StatusOK)
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"access_token": "test_token",
