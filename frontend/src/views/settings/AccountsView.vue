@@ -458,7 +458,7 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
             size="sm" 
             @click="launchWhatsAppSignup"
             :disabled="isConnectingFB"
-            class="bg-[#1877f2] hover:bg-[#166fe5] text-white border-none shadow-none"
+            class="bg-gradient-to-br from-[#1877F2] to-[#0C5DC7] hover:from-[#166FE5] hover:to-[#0A4DAD] text-white border-none shadow-none"
           >
             <Loader2 v-if="isConnectingFB" class="h-4 w-4 mr-2 animate-spin" />
             <Facebook v-else class="h-4 w-4 mr-2" />
@@ -707,7 +707,7 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
                 @click="launchWhatsAppSignup" 
                 size="lg" 
                 :disabled="isConnectingFB || !isFBSDKLoaded"
-                class="bg-[#1877f2] hover:bg-[#166fe5] text-white border-none shadow-none"
+                class="bg-gradient-to-br from-[#1877F2] to-[#0C5DC7] hover:from-[#166FE5] hover:to-[#0A4DAD] text-white border-none shadow-none"
               >
                 <Facebook v-if="!isConnectingFB" class="mr-2 h-5 w-5" />
                 <Loader2 v-else class="mr-2 h-5 w-5 animate-spin" />
