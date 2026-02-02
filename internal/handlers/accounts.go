@@ -534,13 +534,8 @@ func (a *App) ExchangeToken(r *fastglue.Request) error {
 	var account models.WhatsAppAccount
 	var existingAccount bool
 	// Use Unscoped to find even soft-deleted accounts to avoid unique constraint violations
-	if err := a.DB.Unscoped().Where("phone_id = ? AND organization_id = ?", req.PhoneID, orgID).First(&account).Error; err == nil {
+	if err := a.DB.Where("phone_id = ? AND organization_id = ?", req.PhoneID, orgID).First(&account).Error; err == nil {
 		existingAccount = true
-		// If it was deleted, we need to restore it (reset deleted_at)
-		if account.DeletedAt.Valid {
-			account.DeletedAt.Valid = false
-			account.DeletedAt.Time = time.Time{}
-		}
 	}
 
 	if req.Name == "" {
