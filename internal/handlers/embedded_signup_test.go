@@ -314,7 +314,7 @@ func TestApp_ExchangeToken_Success_CodeOnly_Discovery(t *testing.T) {
 	assert.Equal(t, "active", resp.Data["status"])
 	assert.Equal(t, phoneID, resp.Data["phone_id"])
 	assert.Equal(t, wabaID, resp.Data["business_id"])
-	assert.Equal(t, "v24.0", resp.Data["api_version"])
+	assert.Equal(t, "v21.0", resp.Data["api_version"])
 }
 
 func TestApp_ExchangeToken_MissingFields(t *testing.T) {
