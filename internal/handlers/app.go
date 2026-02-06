@@ -119,6 +119,23 @@ func (a *App) ReadyCheck(r *fastglue.Request) error {
 	})
 }
 
+// GetClientConfig returns public configuration values for the frontend
+func (a *App) GetClientConfig(r *fastglue.Request) error {
+	type ClientConfig struct {
+		WhatsAppAppID      string `json:"whatsapp_app_id"`
+		WhatsAppConfigID   string `json:"whatsapp_config_id"`
+		WhatsAppAPIVersion string `json:"whatsapp_api_version"`
+	}
+
+	config := ClientConfig{
+		WhatsAppAppID:      a.Config.WhatsApp.AppID,
+		WhatsAppConfigID:   a.Config.WhatsApp.ConfigID,
+		WhatsAppAPIVersion: a.Config.WhatsApp.APIVersion,
+	}
+
+	return r.SendEnvelope(config)
+}
+
 // StartCampaignStatsSubscriber starts listening for campaign stats updates from Redis pub/sub
 // and broadcasts them via WebSocket
 func (a *App) StartCampaignStatsSubscriber() error {

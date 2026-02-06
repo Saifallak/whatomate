@@ -420,3 +420,307 @@ func (a *App) SubscribeApp(r *fastglue.Request) error {
 		"message": "App subscribed to webhooks successfully. You should now receive incoming messages.",
 	})
 }
+
+// ExchangeToken exchanges the temporary code for a permanent access token and creates the account
+func (a *App) ExchangeToken(r *fastglue.Request) error {
+	orgID, err := a.getOrgID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	var req struct {
+		Code               string `json:"code" validate:"required"`
+		PhoneID            string `json:"phone_id"` // Optional: Discovered via token if missing
+		WABAID             string `json:"waba_id"`  // Optional: Discovered via token if missing
+		Name               string `json:"name"`
+		WebhookVerifyToken string `json:"webhook_verify_token"`
+	}
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+
+	// LOG: Incoming request from Facebook
+	a.Log.Info("[FB_SIGNUP] Received exchange token request",
+		"code_length", len(req.Code),
+		"phone_id", req.PhoneID,
+		"waba_id", req.WABAID,
+		"name_provided", req.Name != "",
+		"name", req.Name,
+		"webhook_token_provided", req.WebhookVerifyToken != "",
+		"organization_id", orgID)
+
+	if req.Code == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Code is required", nil, "")
+	}
+
+	// 1. Exchange code for user access token using WhatsApp service
+	ctx := context.Background()
+	a.Log.Info("[FB_SIGNUP] Exchanging code for access token",
+		"app_id", a.Config.WhatsApp.AppID,
+		"api_version", a.Config.WhatsApp.APIVersion)
+
+	accessToken, err := a.WhatsApp.ExchangeCodeForToken(ctx, req.Code,
+		a.Config.WhatsApp.AppID, a.Config.WhatsApp.AppSecret, a.Config.WhatsApp.APIVersion)
+	if err != nil {
+		a.Log.Error("[FB_SIGNUP] Failed to exchange token", "error", err, "code_length", len(req.Code))
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+	}
+
+	a.Log.Info("[FB_SIGNUP] Token exchange successful", "token_length", len(accessToken))
+
+	// DISCOVERY: If IDs are missing, try to find them using the token
+	if req.PhoneID == "" || req.WABAID == "" {
+		a.Log.Info("[FB_SIGNUP] IDs missing, attempting discovery via debug_token")
+
+		// 1. Debug the token to find the WABA ID in granular_scopes
+		appAccessToken := fmt.Sprintf("%s|%s", a.Config.WhatsApp.AppID, a.Config.WhatsApp.AppSecret)
+
+		debugInfo, err := a.WhatsApp.GetTokenDebugInfo(ctx, accessToken, appAccessToken)
+		if err != nil {
+			a.Log.Error("[FB_SIGNUP] Failed to debug token", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to validate token details: "+err.Error(), nil, "")
+		}
+
+		// 2. Find WABA ID from Granular Scopes
+		// Scope: whatsapp_business_management
+		var discoveredWABAID string
+		for _, scope := range debugInfo.GranularScopes {
+			if scope.Scope == "whatsapp_business_management" {
+				if len(scope.TargetIds) > 0 {
+					discoveredWABAID = scope.TargetIds[0]
+					break
+				}
+			}
+		}
+
+		if discoveredWABAID == "" {
+			a.Log.Warn("[FB_SIGNUP] No WABA ID found in granular scopes, falling back to /me/accounts strategy")
+			// Fallback to old strategy if granular scope is missing
+			sharedInfo, err := a.WhatsApp.GetSharedWABA(ctx, accessToken)
+			if err == nil && len(sharedInfo.Data) > 0 {
+				discoveredWABAID = sharedInfo.Data[0].ID
+			}
+		}
+
+		if discoveredWABAID == "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Could not discover WhatsApp Business Account ID from token", nil, "")
+		}
+
+		req.WABAID = discoveredWABAID
+		a.Log.Info("[FB_SIGNUP] Discovered WABA ID", "waba_id", req.WABAID)
+
+		// 3. Fetch Phone Numbers for this WABA
+		if req.PhoneID == "" {
+			phonesResp, err := a.WhatsApp.GetWABAPhoneNumbers(ctx, req.WABAID, accessToken)
+			if err != nil {
+				a.Log.Error("[FB_SIGNUP] Failed to fetch phone numbers", "error", err)
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to fetch phone numbers from WABA: "+err.Error(), nil, "")
+			}
+
+			if len(phonesResp.Data) == 0 {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "No phone numbers found in this WhatsApp Business Account", nil, "")
+			}
+
+			// User selects only ONE account in the flow, so we take the first one found.
+			phone := phonesResp.Data[0]
+			req.PhoneID = phone.ID
+			req.Name = fmt.Sprintf("%s (%s)", phone.VerifiedName, phone.DisplayPhoneNumber)
+			a.Log.Info("[FB_SIGNUP] Discovered Phone", "phone_id", req.PhoneID, "name", req.Name)
+		}
+	}
+
+	// 2. We can now create/update the account
+	var account models.WhatsAppAccount
+	var existingAccount bool
+	// Use Unscoped to find even soft-deleted accounts to avoid unique constraint violations
+	if err := a.DB.Where("phone_id = ? AND organization_id = ?", req.PhoneID, orgID).First(&account).Error; err == nil {
+		existingAccount = true
+	}
+
+	if req.Name == "" {
+		// Try to fetch name from Meta using WhatsApp service
+		a.Log.Info("[FB_SIGNUP] Fetching phone number info from Meta", "phone_id", req.PhoneID)
+		phoneInfo, err := a.WhatsApp.GetPhoneNumberInfo(ctx, req.PhoneID, accessToken, a.Config.WhatsApp.APIVersion)
+		if err == nil && phoneInfo.VerifiedName != "" {
+			a.Log.Info("[FB_SIGNUP] Phone info retrieved",
+				"verified_name", phoneInfo.VerifiedName,
+				"display_phone_number", phoneInfo.DisplayPhoneNumber,
+				"quality_rating", phoneInfo.QualityRating)
+			req.Name = fmt.Sprintf("%s %s", phoneInfo.VerifiedName, generateNumericPIN(4))
+		} else {
+			if err != nil {
+				a.Log.Warn("[FB_SIGNUP] Failed to fetch phone info", "error", err)
+			}
+			// Safe substring handling
+			suffix := req.PhoneID
+			if len(req.PhoneID) > 4 {
+				suffix = req.PhoneID[len(req.PhoneID)-4:]
+			}
+			req.Name = "WhatsApp Account " + suffix
+			a.Log.Info("[FB_SIGNUP] Using generated account name", "name", req.Name)
+		}
+	}
+
+	// Generate verify token if needed
+	if req.WebhookVerifyToken == "" {
+		if existingAccount {
+			req.WebhookVerifyToken = account.WebhookVerifyToken
+		} else {
+			req.WebhookVerifyToken = generateVerifyToken()
+		}
+	}
+
+	account.OrganizationID = orgID
+	account.Name = req.Name
+	account.AppID = a.Config.WhatsApp.AppID
+	account.PhoneID = req.PhoneID
+	account.BusinessID = req.WABAID
+	account.AccessToken = accessToken
+	account.WebhookVerifyToken = req.WebhookVerifyToken
+	account.APIVersion = a.Config.WhatsApp.APIVersion
+	account.Status = "pending_registration"
+
+	if !existingAccount {
+		account.IsDefaultIncoming = false
+		account.IsDefaultOutgoing = false
+		account.AutoReadReceipt = false
+	}
+
+	// 3. Attempt Auto-Registration with random PIN using WhatsApp service
+	generatedPin := generateNumericPIN(6)
+	a.Log.Info("[FB_SIGNUP] Attempting auto-registration", "phone_id", account.PhoneID, "pin_length", len(generatedPin))
+	regErr := a.WhatsApp.RegisterPhoneNumber(ctx, account.PhoneID, generatedPin, accessToken, account.APIVersion)
+
+	if regErr == nil {
+		account.Status = "active"
+		account.Pin = generatedPin
+		a.Log.Info("[FB_SIGNUP] Auto-registration successful", "phone_id", account.PhoneID)
+	} else {
+		a.Log.Warn("[FB_SIGNUP] Auto-registration failed (likely existing PIN or permissions)",
+			"error", regErr,
+			"phone_id", account.PhoneID,
+			"error_type", fmt.Sprintf("%T", regErr))
+		account.Status = "pending_registration"
+	}
+
+	// 4. Subscribe app to WABA webhooks
+	if err := a.WhatsApp.SubscribeApp(ctx, a.toWhatsAppAccount(&account)); err != nil {
+		a.Log.Error("Failed to subscribe app to WABA", "error", err)
+	}
+
+	if err := a.DB.Save(&account).Error; err != nil {
+		a.Log.Error("Failed to save account", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save account", nil, "")
+	}
+
+	// Invalidate cache
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+
+	// Log success with full details
+	a.Log.Info("[FB_SIGNUP] Account created/updated via embedded signup",
+		"account_id", account.ID,
+		"phone_id", account.PhoneID,
+		"waba_id", account.BusinessID,
+		"status", account.Status,
+		"name", account.Name,
+		"has_pin", account.Pin != "",
+		"organization_id", orgID,
+		"existing_account", existingAccount)
+
+	accResp := accountToResponse(account)
+
+	// Return PIN to user if auto-registration succeeded
+	// User needs this for Meta Business Manager
+	response := map[string]interface{}{
+		"id":                   accResp.ID,
+		"name":                 accResp.Name,
+		"app_id":               accResp.AppID,
+		"phone_id":             accResp.PhoneID,
+		"business_id":          accResp.BusinessID,
+		"webhook_verify_token": accResp.WebhookVerifyToken,
+		"api_version":          accResp.APIVersion,
+		"status":               accResp.Status,
+		"has_access_token":     accResp.HasAccessToken,
+		"created_at":           accResp.CreatedAt,
+	}
+
+	// Include PIN only if registration succeeded
+	if account.Status == "active" && account.Pin != "" {
+		response["pin"] = account.Pin
+	}
+
+	// Add warning if registration failed so UI can show "Retry Register"
+	if regErr != nil {
+		response["warning"] = "Registration failed: " + regErr.Error()
+		response["registration_error"] = regErr.Error()
+	}
+
+	return r.SendEnvelope(response)
+}
+
+// RegisterPhone registers the phone number with Two-Step Verification
+func (a *App) RegisterPhone(r *fastglue.Request) error {
+	orgID, err := a.getOrgID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	id, err := parsePathUUID(r, "id", "account")
+	if err != nil {
+		return nil
+	}
+
+	var req struct {
+		Pin string `json:"pin"` // Optional custom PIN
+	}
+	_ = r.Decode(&req, "json")
+
+	var account models.WhatsAppAccount
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Account not found", nil, "")
+	}
+
+	// If PIN is not provided, generate a random one
+	pin := req.Pin
+	if pin == "" {
+		pin = generateNumericPIN(6)
+	}
+
+	// Call Meta Register endpoint using WhatsApp service
+	ctx := context.Background()
+	if err := a.WhatsApp.RegisterPhoneNumber(ctx, account.PhoneID, pin, account.AccessToken, account.APIVersion); err != nil {
+		a.Log.Error("Manual registration failed", "error", err)
+		return r.SendEnvelope(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+	}
+
+	// Success
+	account.Status = "active"
+	account.Pin = pin
+
+	if err := a.DB.Save(&account).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update account status", nil, "")
+	}
+
+	// Invalidate cache
+	a.InvalidateWhatsAppAccountCache(account.PhoneID)
+
+	return r.SendEnvelope(map[string]interface{}{
+		"success": true,
+		"message": "Phone number registered successfully",
+		"pin":     pin,
+	})
+}
+
+func generateNumericPIN(length int) string {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "123456" // Fallback
+	}
+	for i := range b {
+		b[i] = (b[i] % 10) + '0'
+	}
+	return string(b)
+}

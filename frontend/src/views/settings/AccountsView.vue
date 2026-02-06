@@ -36,7 +36,8 @@ import {
   Settings2,
   TestTube2,
   Store,
-  Bell
+  Bell,
+  Facebook
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
@@ -93,6 +94,11 @@ const accountToDelete = ref<WhatsAppAccount | null>(null)
 const isProfileDialogOpen = ref(false)
 const profileAccount = ref<WhatsAppAccount | null>(null)
 
+// Facebook Embedded Signup State
+const whatsappConfig = ref<{ app_id: string; config_id: string; api_version: string } | null>(null)
+const isFBSDKLoaded = ref(false)
+const isConnectingFB = ref(false)
+
 function openProfileDialog(account: WhatsAppAccount) {
   profileAccount.value = account
   isProfileDialogOpen.value = true
@@ -118,7 +124,7 @@ watch(() => organizationsStore.selectedOrgId, () => {
 })
 
 onMounted(async () => {
-  await fetchAccounts()
+  await Promise.all([fetchAccounts(), fetchWhatsAppConfig()])
 })
 
 async function fetchAccounts() {
@@ -132,6 +138,157 @@ async function fetchAccounts() {
     accounts.value = []
   } finally {
     isLoading.value = false
+  }
+}
+
+async function fetchWhatsAppConfig() {
+  try {
+    const response = await api.get('/config')
+    whatsappConfig.value = {
+      app_id: response.data.data.whatsapp_app_id,
+      config_id: response.data.data.whatsapp_config_id,
+      api_version: response.data.data.whatsapp_api_version || 'v21.0'
+    }
+    if (whatsappConfig.value.app_id && whatsappConfig.value.config_id) {
+      loadFacebookSDK()
+    }
+  } catch (error: any) {
+    console.error('Failed to fetch WhatsApp config:', error)
+  }
+}
+
+function loadFacebookSDK() {
+  if (isFBSDKLoaded.value || !whatsappConfig.value?.app_id) return
+
+  const script = document.createElement('script')
+  script.src = 'https://connect.facebook.net/en_US/sdk.js'
+  script.async = true
+  script.defer = true
+  script.onload = () => {
+    ;(window as any).FB.init({
+      appId: whatsappConfig.value!.app_id,
+      cookie: true,
+      xfbml: true,
+      version: whatsappConfig.value!.api_version
+    })
+    isFBSDKLoaded.value = true
+  }
+  document.body.appendChild(script)
+}
+
+function launchWhatsAppSignup() {
+  if (!isFBSDKLoaded.value) {
+    toast.error('Facebook SDK not loaded yet. Please wait...')
+    return
+  }
+
+  if (!whatsappConfig.value) {
+    toast.error('WhatsApp configuration not loaded')
+    return
+  }
+
+  isConnectingFB.value = true
+  console.log('[FB_SIGNUP] Launching Facebook login with config:', {
+    config_id: whatsappConfig.value.config_id,
+    app_id: whatsappConfig.value.app_id,
+    api_version: whatsappConfig.value.api_version
+  })
+
+  // @ts-ignore
+  window.FB.login(
+    (response: any) => {
+      console.log('[FB_SIGNUP] Facebook login response:', JSON.stringify(response, null, 2))
+      
+      if (response.authResponse) {
+        console.log('[FB_SIGNUP] Auth response received:', {
+          code_length: response.authResponse.code?.length || 0,
+          has_code: !!response.authResponse.code,
+          phone_number_id: response.authResponse.phone_number_id,
+          waba_id: response.authResponse.waba_id,
+          all_keys: Object.keys(response.authResponse)
+        })
+
+        const code = response.authResponse.code
+        const phoneNumberId = response.authResponse.phone_number_id
+        const wabaId = response.authResponse.waba_id
+
+        // Validate required fields
+        if (!code) {
+          console.error('[FB_SIGNUP] Missing code in response')
+          toast.error('Incomplete data from Facebook: missing authorization code')
+          isConnectingFB.value = false
+          return
+        }
+
+        // We can now proceed even if phone_number_id or waba_id are missing,
+        // as the backend will attempt to discover them using the code.
+        if (!phoneNumberId || !wabaId) {
+          console.log('[FB_SIGNUP] Missing IDs in response, proceeding with code only (discovery mode)')
+        }
+
+        console.log('[FB_SIGNUP] Exchange token request:', {
+          code_length: code.length,
+          phone_id: phoneNumberId || 'discovery_mode',
+          waba_id: wabaId || 'discovery_mode'
+        })
+        exchangeCodeForToken(code, phoneNumberId, wabaId)
+      } else if (response.error) {
+        console.error('[FB_SIGNUP] Facebook error:', response.error)
+        toast.error(`Facebook error: ${response.error.message || 'Unknown error'}`)
+        isConnectingFB.value = false
+      } else {
+        console.warn('[FB_SIGNUP] Login cancelled by user')
+        toast.error('Facebook login was cancelled')
+        isConnectingFB.value = false
+      }
+    },
+    {
+      config_id: whatsappConfig.value.config_id,
+      response_type: 'code',
+      override_default_response_type: true,
+      extras: {
+        setup: {}
+      }
+    }
+  )
+}
+
+async function exchangeCodeForToken(code: string, phoneNumberId: string, wabaId: string) {
+  try {
+    console.log('[FB_SIGNUP] Sending exchange token request:', {
+      code_length: code.length,
+      phone_id: phoneNumberId,
+      waba_id: wabaId
+    })
+
+    const response = await api.post('/accounts/exchange-token', { 
+      code,
+      phone_id: phoneNumberId,
+      waba_id: wabaId
+    })
+    
+    console.log('[FB_SIGNUP] Exchange token response:', response.data)
+    const account = response.data.data
+
+    if (account.status === 'pending_registration') {
+      console.log('[FB_SIGNUP] Account pending registration')
+      toast.warning('Account created. Phone registration required.')
+      // Optionally prompt for PIN here or let user handle it manually
+    } else if (account.status === 'active') {
+      console.log('[FB_SIGNUP] Account active, PIN:', account.pin ? 'provided' : 'not provided')
+      toast.success('WhatsApp account connected successfully!')
+      if (account.pin) {
+        // Show PIN to user for future reference
+        toast.info(`Your 2FA PIN: ${account.pin}. Please save it securely.`, { duration: 10000 })
+      }
+    }
+
+    await fetchAccounts()
+  } catch (error: any) {
+    console.error('[FB_SIGNUP] Exchange token error:', error)
+    toast.error(getErrorMessage(error, 'Failed to connect WhatsApp account'))
+  } finally {
+    isConnectingFB.value = false
   }
 }
 
@@ -298,10 +455,23 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
       :breadcrumbs="[{ label: $t('settings.title'), href: '/settings' }, { label: $t('settings.accounts') }]"
     >
       <template #actions>
-        <Button variant="outline" size="sm" @click="openCreateDialog">
-          <Plus class="h-4 w-4 mr-2" />
+        <div class="flex items-center gap-2">
+          <Button 
+            v-if="whatsappConfig?.app_id && whatsappConfig?.config_id"
+            size="sm" 
+            @click="launchWhatsAppSignup"
+            :disabled="isConnectingFB"
+            class="bg-gradient-to-br from-[#1877F2] to-[#0C5DC7] hover:from-[#166FE5] hover:to-[#0A4DAD] text-white border-none shadow-none"
+          >
+            <Loader2 v-if="isConnectingFB" class="h-4 w-4 mr-2 animate-spin" />
+            <Facebook v-else class="h-4 w-4 mr-2" />
+            Connect with Facebook
+          </Button>
+          <Button variant="outline" size="sm" @click="openCreateDialog">
+            <Plus class="h-4 w-4 mr-2" />
           {{ $t('accounts.addAccount') }}
-        </Button>
+          </Button>
+        </div>
       </template>
     </PageHeader>
 
@@ -531,12 +701,26 @@ const webhookUrl = window.location.origin + basePath + '/api/webhook'
             <div class="h-16 w-16 rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-500/20">
               <Phone class="h-8 w-8 text-white" />
             </div>
-            <p class="text-lg font-medium text-white light:text-gray-900">{{ $t('accounts.noAccounts') }}</p>
-            <p class="text-sm mb-4">{{ $t('accounts.noAccountsDesc') }}</p>
-            <Button variant="outline" size="sm" @click="openCreateDialog">
-              <Plus class="h-4 w-4 mr-2" />
+            <p class="text-lg font-medium text-white light:text-gray-900 mb-2">No WhatsApp accounts connected</p>
+            <p class="text-sm text-muted-foreground max-w-md mx-auto mb-6">
+              Connect your WhatsApp Business account via Facebook for quick setup, or use manual entry if you have your credentials ready.
+            </p>
+            <div class="flex gap-3 justify-center">
+              <Button 
+                @click="launchWhatsAppSignup" 
+                size="lg" 
+                :disabled="isConnectingFB || !isFBSDKLoaded"
+                class="bg-gradient-to-br from-[#1877F2] to-[#0C5DC7] hover:from-[#166FE5] hover:to-[#0A4DAD] text-white border-none shadow-none"
+              >
+                <Facebook v-if="!isConnectingFB" class="mr-2 h-5 w-5" />
+                <Loader2 v-else class="mr-2 h-5 w-5 animate-spin" />
+                Connect with Facebook
+              </Button>
+              <Button @click="isDialogOpen = true" size="lg" variant="outline">
+                <Plus class="mr-2 h-5 w-5" />
               {{ $t('accounts.addAccount') }}
-            </Button>
+              </Button>
+            </div>
           </div>
         </div>
 

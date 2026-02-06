@@ -298,6 +298,7 @@ type WhatsAppAccount struct {
 	IsDefaultOutgoing  bool      `gorm:"default:false" json:"is_default_outgoing"`
 	AutoReadReceipt    bool      `gorm:"default:false" json:"auto_read_receipt"`
 	Status             string    `gorm:"size:20;default:'active'" json:"status"`
+	Pin                string    `gorm:"size:6" json:"pin"` // 6-digit 2FA PIN
 
 	// Relations
 	Organization *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
