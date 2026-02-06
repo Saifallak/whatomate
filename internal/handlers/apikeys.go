@@ -60,13 +60,21 @@ func (a *App) ListAPIKeys(r *fastglue.Request) error {
 	}
 
 	pg := parsePagination(r)
+	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+
+	query := a.DB.Model(&models.APIKey{}).Where("organization_id = ?", orgID)
+
+	// Apply search filter - search by name or key prefix (case-insensitive)
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("name ILIKE ? OR key_prefix ILIKE ?", searchPattern, searchPattern)
+	}
 
 	var total int64
-	a.DB.Model(&models.APIKey{}).Where("organization_id = ?", orgID).Count(&total)
+	query.Count(&total)
 
 	var apiKeys []models.APIKey
-	if err := pg.Apply(a.DB.Where("organization_id = ?", orgID).
-		Order("created_at DESC")).
+	if err := pg.Apply(query.Order("created_at DESC")).
 		Find(&apiKeys).Error; err != nil {
 		a.Log.Error("Failed to list API keys", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list API keys", nil, "")

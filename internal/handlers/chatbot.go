@@ -416,13 +416,22 @@ func (a *App) ListKeywordRules(r *fastglue.Request) error {
 	}
 
 	pg := parsePagination(r)
+	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+
+	query := a.DB.Model(&models.KeywordRule{}).Where("organization_id = ?", orgID)
+
+	// Apply search filter - search by name or keywords
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		// Search in name (case-insensitive) or in keywords JSONB array
+		query = query.Where("name ILIKE ? OR keywords::text ILIKE ?", searchPattern, searchPattern)
+	}
 
 	var total int64
-	a.DB.Model(&models.KeywordRule{}).Where("organization_id = ?", orgID).Count(&total)
+	query.Count(&total)
 
 	var rules []models.KeywordRule
-	if err := pg.Apply(a.DB.Where("organization_id = ?", orgID).
-		Order("priority DESC, created_at DESC")).
+	if err := pg.Apply(query.Order("priority DESC, created_at DESC")).
 		Find(&rules).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to fetch keyword rules", nil, "")
 	}
@@ -651,14 +660,21 @@ func (a *App) ListChatbotFlows(r *fastglue.Request) error {
 	}
 
 	pg := parsePagination(r)
+	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+
+	query := a.DB.Model(&models.ChatbotFlow{}).Where("organization_id = ?", orgID)
+
+	// Apply search filter - search by name, description, or trigger keywords
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("name ILIKE ? OR description ILIKE ? OR trigger_keywords::text ILIKE ?", searchPattern, searchPattern, searchPattern)
+	}
 
 	var total int64
-	a.DB.Model(&models.ChatbotFlow{}).Where("organization_id = ?", orgID).Count(&total)
+	query.Count(&total)
 
 	var flows []models.ChatbotFlow
-	if err := pg.Apply(a.DB.Where("organization_id = ?", orgID).
-		Preload("Steps").
-		Order("created_at DESC")).
+	if err := pg.Apply(query.Preload("Steps").Order("created_at DESC")).
 		Find(&flows).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to fetch flows", nil, "")
 	}
@@ -1027,13 +1043,21 @@ func (a *App) ListAIContexts(r *fastglue.Request) error {
 	}
 
 	pg := parsePagination(r)
+	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+
+	query := a.DB.Model(&models.AIContext{}).Where("organization_id = ?", orgID)
+
+	// Apply search filter - search by name, static content, or trigger keywords
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("name ILIKE ? OR static_content ILIKE ? OR trigger_keywords::text ILIKE ?", searchPattern, searchPattern, searchPattern)
+	}
 
 	var total int64
-	a.DB.Model(&models.AIContext{}).Where("organization_id = ?", orgID).Count(&total)
+	query.Count(&total)
 
 	var contexts []models.AIContext
-	if err := pg.Apply(a.DB.Where("organization_id = ?", orgID).
-		Order("priority DESC, created_at DESC")).
+	if err := pg.Apply(query.Order("priority DESC, created_at DESC")).
 		Find(&contexts).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to fetch AI contexts", nil, "")
 	}

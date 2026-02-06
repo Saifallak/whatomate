@@ -52,13 +52,21 @@ func (a *App) ListWebhooks(r *fastglue.Request) error {
 	}
 
 	pg := parsePagination(r)
+	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+
+	query := a.DB.Where("organization_id = ?", orgID)
+
+	// Apply search filter - search by name or URL (case-insensitive)
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("name ILIKE ? OR url ILIKE ?", searchPattern, searchPattern)
+	}
 
 	var total int64
-	a.DB.Model(&models.Webhook{}).Where("organization_id = ?", orgID).Count(&total)
+	query.Model(&models.Webhook{}).Count(&total)
 
 	var webhooks []models.Webhook
-	if err := pg.Apply(a.DB.Where("organization_id = ?", orgID).
-		Order("created_at DESC")).
+	if err := pg.Apply(query.Model(&models.Webhook{}).Order("created_at DESC")).
 		Find(&webhooks).Error; err != nil {
 		a.Log.Error("Failed to list webhooks", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list webhooks", nil, "")

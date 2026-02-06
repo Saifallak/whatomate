@@ -81,13 +81,21 @@ func (a *App) ListCustomActions(r *fastglue.Request) error {
 	}
 
 	pg := parsePagination(r)
+	search := string(r.RequestCtx.QueryArgs().Peek("search"))
+
+	query := a.DB.Model(&models.CustomAction{}).Where("organization_id = ?", orgID)
+
+	// Apply search filter - search by name (case-insensitive)
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("name ILIKE ?", searchPattern)
+	}
 
 	var total int64
-	a.DB.Model(&models.CustomAction{}).Where("organization_id = ?", orgID).Count(&total)
+	query.Count(&total)
 
 	var actions []models.CustomAction
-	if err := pg.Apply(a.DB.Where("organization_id = ?", orgID).
-		Order("display_order ASC, created_at DESC")).
+	if err := pg.Apply(query.Order("display_order ASC, created_at DESC")).
 		Find(&actions).Error; err != nil {
 		a.Log.Error("Failed to list custom actions", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list custom actions", nil, "")

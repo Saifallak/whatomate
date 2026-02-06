@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/url"
+	"strings"
 
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
@@ -34,11 +35,24 @@ func (a *App) ListTags(r *fastglue.Request) error {
 	}
 
 	pg := parsePagination(r)
+	search := strings.ToLower(string(r.RequestCtx.QueryArgs().Peek("search")))
 
 	tags, err := a.getTagsCached(orgID)
 	if err != nil {
 		a.Log.Error("Failed to list tags", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list tags", nil, "")
+	}
+
+	// Apply search filter (case-insensitive) - search by name or color
+	if search != "" {
+		filtered := make([]models.Tag, 0)
+		for _, tag := range tags {
+			if strings.Contains(strings.ToLower(tag.Name), search) ||
+				strings.Contains(strings.ToLower(tag.Color), search) {
+				filtered = append(filtered, tag)
+			}
+		}
+		tags = filtered
 	}
 
 	total := len(tags)

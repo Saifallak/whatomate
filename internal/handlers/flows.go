@@ -51,6 +51,7 @@ func (a *App) ListFlows(r *fastglue.Request) error {
 	// Optional filters
 	accountName := string(r.RequestCtx.QueryArgs().Peek("account"))
 	status := string(r.RequestCtx.QueryArgs().Peek("status"))
+	search := string(r.RequestCtx.QueryArgs().Peek("search"))
 
 	query := a.DB.Where("organization_id = ?", orgID)
 
@@ -59,6 +60,11 @@ func (a *App) ListFlows(r *fastglue.Request) error {
 	}
 	if status != "" {
 		query = query.Where("status = ?", status)
+	}
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		// Search by flow name (case-insensitive)
+		query = query.Where("name ILIKE ?", searchPattern)
 	}
 
 	var total int64
