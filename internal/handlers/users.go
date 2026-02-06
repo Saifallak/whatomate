@@ -30,6 +30,7 @@ type UserResponse struct {
 	IsActive       bool         `json:"is_active"`
 	IsAvailable    bool         `json:"is_available"`
 	IsSuperAdmin   bool         `json:"is_super_admin"`
+	IsMember       bool         `json:"is_member"`
 	OrganizationID uuid.UUID    `json:"organization_id"`
 	Settings       models.JSONB `json:"settings,omitempty"`
 	CreatedAt      string       `json:"created_at"`
@@ -80,28 +81,69 @@ func (a *App) ListUsers(r *fastglue.Request) error {
 	pg := parsePagination(r)
 	search := string(r.RequestCtx.QueryArgs().Peek("search"))
 
-	baseQuery := a.ScopeToOrg(a.DB, userID, orgID)
+	// Query users via user_organizations to include cross-org members.
+	joinClause := "JOIN user_organizations ON user_organizations.user_id = users.id AND user_organizations.organization_id = ? AND user_organizations.deleted_at IS NULL"
+
+	countQuery := a.DB.Joins(joinClause, orgID).Where("users.deleted_at IS NULL")
+	dataQuery := a.DB.Joins(joinClause, orgID).Where("users.deleted_at IS NULL")
 	if search != "" {
-		baseQuery = baseQuery.Where("full_name ILIKE ? OR email ILIKE ?", "%"+search+"%", "%"+search+"%")
+		countQuery = countQuery.Where("users.full_name ILIKE ? OR users.email ILIKE ?", "%"+search+"%", "%"+search+"%")
+		dataQuery = dataQuery.Where("users.full_name ILIKE ? OR users.email ILIKE ?", "%"+search+"%", "%"+search+"%")
 	}
 
-	// Get total count
 	var total int64
-	baseQuery.Model(&models.User{}).Count(&total)
+	countQuery.Model(&models.User{}).Count(&total)
 
 	var users []models.User
-	if err := pg.Apply(baseQuery.
-		Preload("Role").
-		Order("created_at DESC")).
+	if err := pg.Apply(dataQuery.Order("users.created_at DESC")).
 		Find(&users).Error; err != nil {
 		a.Log.Error("Failed to list users", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list users", nil, "")
 	}
 
-	// Convert to response format (hide sensitive data)
+	// Fetch org-specific roles and membership info from user_organizations
+	userIDs := make([]uuid.UUID, len(users))
+	for i, u := range users {
+		userIDs[i] = u.ID
+	}
+	var orgMemberships []models.UserOrganization
+	if len(userIDs) > 0 {
+		a.DB.Where("user_id IN ? AND organization_id = ?", userIDs, orgID).
+			Preload("Role").
+			Find(&orgMemberships)
+	}
+	orgRoleMap := make(map[uuid.UUID]*models.CustomRole, len(orgMemberships))
+	for _, m := range orgMemberships {
+		if m.Role != nil {
+			orgRoleMap[m.UserID] = m.Role
+		}
+	}
+
+	// Fetch actual home org IDs (separate query avoids JOIN column conflict)
+	homeOrgMap := make(map[uuid.UUID]uuid.UUID, len(users))
+	if len(userIDs) > 0 {
+		type idOrg struct {
+			ID             uuid.UUID
+			OrganizationID uuid.UUID
+		}
+		var homeOrgs []idOrg
+		a.DB.Model(&models.User{}).Select("id, organization_id").Where("id IN ?", userIDs).Find(&homeOrgs)
+		for _, ho := range homeOrgs {
+			homeOrgMap[ho.ID] = ho.OrganizationID
+		}
+	}
+
+	// Convert to response format, using org-specific role
 	response := make([]UserResponse, len(users))
 	for i, user := range users {
-		response[i] = userToResponse(user)
+		// Override user's role with org-specific role for response
+		if orgRole, ok := orgRoleMap[user.ID]; ok {
+			user.Role = orgRole
+			user.RoleID = &orgRole.ID
+		}
+		resp := userToResponse(user)
+		resp.IsMember = homeOrgMap[user.ID] != orgID
+		response[i] = resp
 	}
 
 	return r.SendEnvelope(map[string]interface{}{
@@ -124,14 +166,29 @@ func (a *App) GetUser(r *fastglue.Request) error {
 		return nil
 	}
 
+	// Query via user_organizations to find both native and cross-org members.
+	// Select("users.*") avoids column conflict with user_organizations.organization_id.
 	var user models.User
-	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).
-		Preload("Role").
+	if err := a.DB.
+		Select("users.*").
+		Joins("JOIN user_organizations ON user_organizations.user_id = users.id AND user_organizations.organization_id = ? AND user_organizations.deleted_at IS NULL", orgID).
+		Where("users.id = ? AND users.deleted_at IS NULL", id).
 		First(&user).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "User not found", nil, "")
 	}
 
-	return r.SendEnvelope(userToResponse(user))
+	// Load org-specific role from user_organizations
+	var userOrg models.UserOrganization
+	if err := a.DB.Where("user_id = ? AND organization_id = ?", id, orgID).Preload("Role").First(&userOrg).Error; err == nil && userOrg.RoleID != nil {
+		user.RoleID = userOrg.RoleID
+		user.Role = userOrg.Role
+	} else {
+		a.DB.Preload("Role").First(&user, user.ID)
+	}
+
+	resp := userToResponse(user)
+	resp.IsMember = user.OrganizationID != orgID
+	return r.SendEnvelope(resp)
 }
 
 // CreateUser creates a new user (admin only)
@@ -172,7 +229,7 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 		}
 	}
 
-	// Check if email already exists
+	// Check if email already exists (including soft-deleted users)
 	var existingUser models.User
 	if err := a.DB.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Email already exists", nil, "")
@@ -185,6 +242,65 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create user", nil, "")
 	}
 
+	isSuperAdmin := false
+	if req.IsSuperAdmin != nil && *req.IsSuperAdmin {
+		if !a.IsSuperAdmin(userID) {
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can create super admins", nil, "")
+		}
+		isSuperAdmin = true
+	}
+
+	// Check for soft-deleted user with same email and restore them
+	var softDeleted models.User
+	if err := a.DB.Unscoped().Where("email = ? AND deleted_at IS NOT NULL", req.Email).First(&softDeleted).Error; err == nil {
+		// Restore the soft-deleted user with new details
+		if err := a.DB.Unscoped().Model(&softDeleted).Updates(map[string]interface{}{
+			"deleted_at":      nil,
+			"organization_id": orgID,
+			"password_hash":   string(hashedPassword),
+			"full_name":       req.FullName,
+			"role_id":         roleID,
+			"is_active":       true,
+			"is_super_admin":  isSuperAdmin,
+		}).Error; err != nil {
+			a.Log.Error("Failed to restore user", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create user", nil, "")
+		}
+
+		// Restore or create UserOrganization entry
+		var existingOrg models.UserOrganization
+		if err := a.DB.Unscoped().Where("user_id = ? AND organization_id = ?", softDeleted.ID, orgID).First(&existingOrg).Error; err == nil {
+			a.DB.Unscoped().Model(&existingOrg).Updates(map[string]interface{}{
+				"deleted_at": nil,
+				"role_id":    roleID,
+				"is_default": true,
+			})
+		} else {
+			a.DB.Create(&models.UserOrganization{
+				UserID:         softDeleted.ID,
+				OrganizationID: orgID,
+				RoleID:         roleID,
+				IsDefault:      true,
+			})
+		}
+
+		// Load role for response
+		if roleID != nil {
+			var role models.CustomRole
+			if err := a.DB.Where("id = ?", *roleID).First(&role).Error; err == nil {
+				softDeleted.Role = &role
+			}
+		}
+		softDeleted.OrganizationID = orgID
+		softDeleted.PasswordHash = string(hashedPassword)
+		softDeleted.FullName = req.FullName
+		softDeleted.RoleID = roleID
+		softDeleted.IsActive = true
+		softDeleted.IsSuperAdmin = isSuperAdmin
+
+		return r.SendEnvelope(userToResponse(softDeleted))
+	}
+
 	user := models.User{
 		OrganizationID: orgID,
 		Email:          req.Email,
@@ -192,19 +308,24 @@ func (a *App) CreateUser(r *fastglue.Request) error {
 		FullName:       req.FullName,
 		RoleID:         roleID,
 		IsActive:       true,
-	}
-
-	// Only superadmins can create other superadmins
-	if req.IsSuperAdmin != nil && *req.IsSuperAdmin {
-		if !a.IsSuperAdmin(userID) {
-			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Only super admins can create super admins", nil, "")
-		}
-		user.IsSuperAdmin = true
+		IsSuperAdmin:   isSuperAdmin,
 	}
 
 	if err := a.DB.Create(&user).Error; err != nil {
 		a.Log.Error("Failed to create user", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to create user", nil, "")
+	}
+
+	// Create UserOrganization entry
+	userOrg := models.UserOrganization{
+		UserID:         user.ID,
+		OrganizationID: orgID,
+		RoleID:         roleID,
+		IsDefault:      true,
+	}
+	if err := a.DB.Create(&userOrg).Error; err != nil {
+		a.Log.Error("Failed to create user organization entry", "error", err)
+		// Non-fatal: user was already created
 	}
 
 	// Load role for response
@@ -228,13 +349,31 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 	}
 
 	// Users can update themselves, others need users:write permission
-	if currentUserID != id && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite) {
+	if currentUserID != id && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite, orgID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
+	// Find user via user_organizations (supports cross-org members).
+	// Select("users.*") avoids column conflict with user_organizations.organization_id.
 	var user models.User
-	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).Preload("Role").First(&user).Error; err != nil {
+	if err := a.DB.
+		Select("users.*").
+		Joins("JOIN user_organizations ON user_organizations.user_id = users.id AND user_organizations.organization_id = ? AND user_organizations.deleted_at IS NULL", orgID).
+		Where("users.id = ? AND users.deleted_at IS NULL", id).
+		Preload("Role").
+		First(&user).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "User not found", nil, "")
+	}
+
+	isMember := user.OrganizationID != orgID
+
+	// Load org-specific role for members
+	if isMember {
+		var userOrg models.UserOrganization
+		if err := a.DB.Where("user_id = ? AND organization_id = ?", id, orgID).Preload("Role").First(&userOrg).Error; err == nil && userOrg.RoleID != nil {
+			user.RoleID = userOrg.RoleID
+			user.Role = userOrg.Role
+		}
 	}
 
 	var req UserRequest
@@ -244,11 +383,38 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 	}
 
 	// Only users with users:write permission can change roles
-	if req.RoleID != nil && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite) {
+	if req.RoleID != nil && !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionWrite, orgID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions to change roles", nil, "")
 	}
 
-	// Update fields if provided
+	// For cross-org members, only allow role updates
+	if isMember {
+		if req.RoleID == nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Only role can be updated for organization members", nil, "")
+		}
+		// Validate role exists and belongs to org
+		var newRole models.CustomRole
+		if err := a.DB.Where("id = ? AND organization_id = ?", req.RoleID, orgID).First(&newRole).Error; err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid role", nil, "")
+		}
+		// Update role in user_organizations only
+		if err := a.DB.Model(&models.UserOrganization{}).
+			Where("user_id = ? AND organization_id = ?", id, orgID).
+			Update("role_id", req.RoleID).Error; err != nil {
+			a.Log.Error("Failed to update member role", "error", err)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update member role", nil, "")
+		}
+		a.InvalidateUserPermissionsCache(user.ID)
+
+		// Return updated response
+		user.RoleID = req.RoleID
+		user.Role = &newRole
+		resp := userToResponse(user)
+		resp.IsMember = true
+		return r.SendEnvelope(resp)
+	}
+
+	// Native user: full update
 	if req.Email != "" {
 		var existingUser models.User
 		if err := a.DB.Where("email = ? AND id != ?", req.Email, id).First(&existingUser).Error; err == nil {
@@ -314,6 +480,10 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 
 	// Invalidate permissions cache if role changed
 	if roleChanged {
+		// Sync role change to UserOrganization for this org
+		a.DB.Model(&models.UserOrganization{}).
+			Where("user_id = ? AND organization_id = ?", user.ID, orgID).
+			Update("role_id", user.RoleID)
 		a.InvalidateUserPermissionsCache(user.ID)
 	}
 
@@ -323,7 +493,7 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 	return r.SendEnvelope(userToResponse(user))
 }
 
-// DeleteUser deletes a user
+// DeleteUser deletes a user or removes a member from the organization
 func (a *App) DeleteUser(r *fastglue.Request) error {
 	orgID, err := a.getOrgID(r)
 	if err != nil {
@@ -331,7 +501,7 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 	}
 
 	currentUserID, _ := r.RequestCtx.UserValue("user_id").(uuid.UUID)
-	if !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionDelete) {
+	if !a.HasPermission(currentUserID, models.ResourceUsers, models.ActionDelete, orgID) {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Insufficient permissions", nil, "")
 	}
 
@@ -340,30 +510,54 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 		return nil
 	}
 
-	// Prevent user from deleting themselves
+	// Prevent user from deleting/removing themselves
 	if currentUserID == id {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Cannot delete yourself", nil, "")
 	}
 
-	// Check if user exists
+	// Find user via user_organizations (supports cross-org members).
+	// Select("users.*") avoids column conflict with user_organizations.organization_id.
 	var user models.User
-	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).Preload("Role").First(&user).Error; err != nil {
+	if err := a.DB.
+		Select("users.*").
+		Joins("JOIN user_organizations ON user_organizations.user_id = users.id AND user_organizations.organization_id = ? AND user_organizations.deleted_at IS NULL", orgID).
+		Where("users.id = ? AND users.deleted_at IS NULL", id).
+		Preload("Role").
+		First(&user).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "User not found", nil, "")
 	}
 
-	// Check if this is the last admin (user with admin role)
-	if user.Role != nil && user.Role.Name == "admin" {
+	isMember := user.OrganizationID != orgID
+
+	if isMember {
+		// Cross-org member: only remove from this organization
+		result := a.DB.Where("user_id = ? AND organization_id = ?", id, orgID).Delete(&models.UserOrganization{})
+		if result.Error != nil {
+			a.Log.Error("Failed to remove member", "error", result.Error)
+			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to remove member", nil, "")
+		}
+		a.InvalidateUserPermissionsCache(id)
+		return r.SendEnvelope(map[string]string{"message": "Member removed from organization"})
+	}
+
+	// Native user: check last admin constraint, then delete user account
+
+	// Load org-specific role for admin check
+	var userOrg models.UserOrganization
+	if err := a.DB.Where("user_id = ? AND organization_id = ?", id, orgID).Preload("Role").First(&userOrg).Error; err == nil && userOrg.Role != nil && userOrg.Role.Name == "admin" {
 		var adminRole models.CustomRole
 		if err := a.DB.Where("organization_id = ? AND name = ? AND is_system = ?", orgID, "admin", true).First(&adminRole).Error; err == nil {
 			var adminCount int64
-			a.DB.Model(&models.User{}).Where("organization_id = ? AND role_id = ?", orgID, adminRole.ID).Count(&adminCount)
+			a.DB.Model(&models.UserOrganization{}).
+				Where("organization_id = ? AND role_id = ? AND deleted_at IS NULL", orgID, adminRole.ID).
+				Count(&adminCount)
 			if adminCount <= 1 {
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Cannot delete the last admin", nil, "")
 			}
 		}
 	}
 
-	result := a.DB.Where("id = ? AND organization_id = ?", id, orgID).Delete(&models.User{})
+	result := a.DB.Where("id = ?", id).Delete(&models.User{})
 	if result.Error != nil {
 		a.Log.Error("Failed to delete user", "error", result.Error)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete user", nil, "")
@@ -371,6 +565,9 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 	if result.RowsAffected == 0 {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "User not found", nil, "")
 	}
+
+	// Delete all UserOrganization entries for this user
+	a.DB.Where("user_id = ?", id).Delete(&models.UserOrganization{})
 
 	return r.SendEnvelope(map[string]string{"message": "User deleted successfully"})
 }
@@ -387,6 +584,22 @@ func (a *App) GetCurrentUser(r *fastglue.Request) error {
 		Preload("Role").
 		First(&user).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "User not found", nil, "")
+	}
+
+	// Use org from JWT context (may differ from DB after org switch)
+	orgID, _ := r.RequestCtx.UserValue("organization_id").(uuid.UUID)
+	if orgID != uuid.Nil {
+		user.OrganizationID = orgID
+
+		// Check for org-specific role from user_organizations
+		var userOrg models.UserOrganization
+		if err := a.DB.Where("user_id = ? AND organization_id = ?", userID, orgID).First(&userOrg).Error; err == nil && userOrg.RoleID != nil {
+			user.RoleID = userOrg.RoleID
+			var role models.CustomRole
+			if err := a.DB.Where("id = ?", *userOrg.RoleID).First(&role).Error; err == nil {
+				user.Role = &role
+			}
+		}
 	}
 
 	// Load permissions from cache
@@ -547,6 +760,54 @@ func userToResponse(user models.User) UserResponse {
 	}
 
 	return resp
+}
+
+// MyOrganizationResponse represents an organization in the user's org list
+type MyOrganizationResponse struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Slug           string    `json:"slug"`
+	RoleID         *uuid.UUID `json:"role_id,omitempty"`
+	RoleName       string    `json:"role_name,omitempty"`
+	IsDefault      bool      `json:"is_default"`
+}
+
+// ListMyOrganizations returns all organizations the current user belongs to
+func (a *App) ListMyOrganizations(r *fastglue.Request) error {
+	userID, ok := r.RequestCtx.UserValue("user_id").(uuid.UUID)
+	if !ok {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+
+	var userOrgs []models.UserOrganization
+	if err := a.DB.Where("user_id = ?", userID).
+		Preload("Organization").
+		Preload("Role").
+		Find(&userOrgs).Error; err != nil {
+		a.Log.Error("Failed to list user organizations", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list organizations", nil, "")
+	}
+
+	response := make([]MyOrganizationResponse, 0, len(userOrgs))
+	for _, uo := range userOrgs {
+		item := MyOrganizationResponse{
+			OrganizationID: uo.OrganizationID,
+			IsDefault:      uo.IsDefault,
+			RoleID:         uo.RoleID,
+		}
+		if uo.Organization != nil {
+			item.Name = uo.Organization.Name
+			item.Slug = uo.Organization.Slug
+		}
+		if uo.Role != nil {
+			item.RoleName = uo.Role.Name
+		}
+		response = append(response, item)
+	}
+
+	return r.SendEnvelope(map[string]interface{}{
+		"organizations": response,
+	})
 }
 
 // AvailabilityRequest represents the request body for updating availability
